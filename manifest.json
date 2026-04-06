@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "Tab Suspender",
+  "version": "1.0.0",
+  "description": "Suspends inactive tabs by time. No tab count limits. Works in Chrome and Firefox.",
+  "permissions": ["tabs", "storage", "alarms", "scripting", "idle"],
+  "host_permissions": ["*://*/*"],
+  "background": {
+    "service_worker": "sw.js"
+  },
+  "content_scripts": [{
+    "matches": ["*://*/*"],
+    "match_about_blank": true,
+    "js": ["inject/watch.js"],
+    "run_at": "document_start",
+    "all_frames": true
+  }],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Tab Suspender"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "tab-suspender@local",
+      "strict_min_version": "109.0"
+    }
+  }
+}
