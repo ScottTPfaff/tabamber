@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Tab Suspender",
+  "name": "TabAmber",
   "version": "1.0.0",
-  "description": "Suspends inactive tabs by time. No tab count limits. Works in Chrome and Firefox.",
+  "description": "Your tabs, preserved in amber. Suspends inactive tabs by time with no count limits. Chrome and Firefox.",
   "permissions": ["tabs", "storage", "alarms", "scripting", "idle"],
   "host_permissions": ["*://*/*"],
   "background": {
@@ -17,7 +17,7 @@
   }],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Tab Suspender"
+    "default_title": "TabAmber"
   },
   "options_ui": {
     "page": "options.html",
