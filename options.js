@@ -7,6 +7,10 @@ const DEFAULTS = {
   ai_endpoint: '', ai_model: '',
   ai_features: { pruning: true, habit_analysis: false, group_naming: true, session_digest: false, anomaly_alerts: false },
   ai_data_level: 'categories_only',
+  // Notifications
+  notif_badge: true, notif_chrome: true, notif_sounds: false,
+  // Logging
+  log_level: 'info', log_webhook: '', log_max_entries: 100,
 };
 
 const $ = id => document.getElementById(id);
@@ -121,6 +125,14 @@ $('save').addEventListener('click', () => {
     ai_model: $('ai_model').value,
     ai_features: aiFeatures,
     ai_data_level: aiDataLevel,
+    // Notifications
+    notif_badge: $('notif_badge').checked,
+    notif_chrome: $('notif_chrome').checked,
+    notif_sounds: $('notif_sounds')?.checked ?? false,
+    // Logging
+    log_level: $('log_level').value,
+    log_webhook: $('log_webhook').value.trim(),
+    log_max_entries: parseInt($('log_max_entries')?.value) || 100,
   };
 
   chrome.storage.local.set(prefs, () => {
@@ -128,4 +140,86 @@ $('save').addEventListener('click', () => {
     el.style.display = 'inline';
     setTimeout(() => el.style.display = 'none', 2000);
   });
+});
+
+// ─── Tab Navigation ───────────────────────────────────────────────────────
+
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const tabName = btn.dataset.tab;
+    document.querySelectorAll('.tab-btn').forEach(b => {
+      b.style.borderBottomColor = 'transparent';
+      b.style.color = '#888';
+    });
+    btn.style.borderBottomColor = '#1a73e8';
+    btn.style.color = '#1a73e8';
+    document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
+    $(`tab-${tabName}`).style.display = 'block';
+  });
+});
+
+// ─── Notifications Tab ────────────────────────────────────────────────────
+
+// Load notification and log settings
+chrome.storage.local.get({
+  notif_badge: true, notif_chrome: true, notif_sounds: false,
+  log_level: 'info', log_webhook: '', log_max_entries: 100
+}, prefs => {
+  $('notif_badge').checked = prefs.notif_badge;
+  $('notif_chrome').checked = prefs.notif_chrome;
+  if ($('notif_sounds')) $('notif_sounds').checked = prefs.notif_sounds;
+  $('log_level').value = prefs.log_level;
+  $('log_webhook').value = prefs.log_webhook;
+});
+
+// Save notification/log settings immediately (no separate save button needed)
+['notif_badge', 'notif_chrome', 'log_level', 'log_webhook'].forEach(id => {
+  const el = $(id);
+  if (!el) return;
+  el.addEventListener('change', () => {
+    const update = {};
+    update[id] = el.type === 'checkbox' ? el.checked : el.value;
+    chrome.storage.local.set(update, () => {
+      // Send to SW for runtime config update
+      chrome.runtime.sendMessage({
+        method: 'update-config',
+        log_level: $('log_level').value,
+        log_webhook: $('log_webhook').value,
+        notif_badge: $('notif_badge').checked,
+        notif_chrome: $('notif_chrome').checked,
+      });
+      const el2 = $('notif-saved');
+      el2.style.display = 'inline';
+      setTimeout(() => el2.style.display = 'none', 2000);
+    });
+  });
+});
+
+// Test notification
+$('test-notif').addEventListener('click', () => {
+  const iconData = 'data:image/svg+xml,' + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48"><circle cx="24" cy="24" r="20" fill="#d4a017"/><circle cx="24" cy="24" r="14" fill="#f0c040"/><circle cx="24" cy="24" r="6" fill="#b8920f"/></svg>'
+  );
+  chrome.notifications.create({
+    type: 'basic',
+    iconUrl: iconData,
+    title: 'TabAmber: Test Notification',
+    message: 'If you see this, Chrome notifications are working!',
+    priority: 0,
+  });
+});
+
+// Clear badge
+$('clear-badge-btn').addEventListener('click', () => {
+  chrome.runtime.sendMessage({ method: 'clear-badge' }, () => {
+    const el = $('notif-saved');
+    el.textContent = '✓ Badge cleared';
+    el.style.display = 'inline';
+    setTimeout(() => { el.style.display = 'none'; el.textContent = '✓ Saved'; }, 2000);
+  });
+});
+
+// Open diagnostics
+$('open-diagnostics').addEventListener('click', () => {
+  chrome.tabs.create({ url: 'diagnostics.html' });
 });

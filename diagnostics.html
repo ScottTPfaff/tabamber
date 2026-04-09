@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>TabAmber Diagnostics</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: sans-serif; max-width: 900px; margin: 0 auto; padding: 24px; color: #222; background: #fafafa; }
+
+    h1 { font-size: 20px; margin-bottom: 20px; border-bottom: 2px solid #ddd; padding-bottom: 10px; }
+    h2 { font-size: 15px; margin: 24px 0 10px; color: #555; text-transform: uppercase; letter-spacing: .05em; }
+
+    /* Health cards */
+    .health-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; margin: 12px 0; }
+    .card { background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 14px; text-align: center; }
+    .card .value { font-size: 28px; font-weight: bold; color: #1a73e8; }
+    .card .label { font-size: 12px; color: #888; margin-top: 4px; }
+    .card.error .value { color: #d32f2f; }
+    .card.success .value { color: #2e7d32; }
+
+    /* Log viewer */
+    .log-controls { display: flex; gap: 8px; align-items: center; margin: 8px 0; flex-wrap: wrap; }
+    .log-controls select, .log-controls input { padding: 5px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; }
+    .log-controls button { padding: 5px 12px; border: 1px solid #ccc; border-radius: 4px; cursor: pointer; font-size: 13px; background: #f8f8f8; }
+    .log-controls button:hover { background: #e8e8f0; }
+    .log-controls button.primary { background: #1a73e8; color: #fff; border-color: #1a73e8; }
+    .log-controls button.primary:hover { background: #1558b0; }
+
+    #log-viewer {
+      background: #1e1e1e; color: #d4d4d4; font-family: 'Cascadia Code', 'Fira Code', monospace;
+      font-size: 12px; padding: 12px; border-radius: 6px; max-height: 500px;
+      overflow-y: auto; white-space: pre-wrap; line-height: 1.6; margin: 8px 0;
+    }
+    #log-viewer .log-entry { padding: 2px 0; border-bottom: 1px solid #333; }
+    #log-viewer .log-entry:last-child { border-bottom: none; }
+    #log-viewer .ts { color: #6a9955; }
+    #log-viewer .level-debug { color: #808080; }
+    #log-viewer .level-info { color: #569cd6; }
+    #log-viewer .level-warn { color: #dcdcaa; }
+    #log-viewer .level-error { color: #f44747; font-weight: bold; }
+    #log-viewer .msg { color: #d4d4d4; }
+    #log-viewer .ctx { color: #6a9955; }
+
+    .hint { font-size: 12px; color: #888; }
+
+    /* Critical errors */
+    #critical-panel { background: #fff3e0; border: 1px solid #ffcc80; border-radius: 6px; padding: 12px; margin: 8px 0; }
+    #critical-panel:empty { display: none; }
+    #critical-panel .crit-entry { font-size: 13px; padding: 4px 0; border-bottom: 1px solid #ffe0b2; }
+    #critical-panel .crit-entry:last-child { border: none; }
+  </style>
+</head>
+<body>
+  <h1>🔍 TabAmber Diagnostics</h1>
+
+  <h2>Health</h2>
+  <div class="health-grid" id="health-grid"></div>
+
+  <h2>Critical Errors</h2>
+  <div id="critical-panel"></div>
+
+  <h2>Log Viewer</h2>
+  <div class="log-controls">
+    <select id="filter-level">
+      <option value="all">All Levels</option>
+      <option value="error">Errors Only</option>
+      <option value="warn">Warnings + Errors</option>
+      <option value="info">Info + Up</option>
+      <option value="debug">Debug + Up</option>
+    </select>
+    <input type="text" id="filter-text" placeholder="Filter by text...">
+    <button id="refresh-logs">Refresh</button>
+    <button id="export-logs">Export JSON</button>
+    <button class="primary" id="clear-logs">Clear Logs</button>
+  </div>
+  <div id="log-viewer">Loading...</div>
+
+  <p class="hint">Tip: For VSCode integration, set a local webhook URL in Settings → "log_webhook" to stream logs to a VSCode Output panel.</p>
+
+  <script src="diagnostics.js"></script>
+</body>
+</html>

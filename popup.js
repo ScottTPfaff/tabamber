@@ -3,6 +3,48 @@ const DEFAULTS = {
 };
 const $ = id => document.getElementById(id);
 
+// ─── Diagnostics link ─────────────────────────────────────────────────────
+$('diag-link').addEventListener('click', () => {
+  chrome.tabs.create({ url: 'diagnostics.html' });
+  window.close();
+});
+
+// ─── Error banner ─────────────────────────────────────────────────────────
+const showErrors = () => {
+  chrome.runtime.sendMessage({ method: 'get-critical' }, response => {
+    const errors = response?.critical || [];
+    if (errors.length === 0) {
+      // Check badge count for warnings
+      chrome.runtime.sendMessage({ method: 'get-health' }, hResp => {
+        const h = hResp?.health;
+        if (h && (h.discardErrors > 0 || h.injectErrors > 0 || h.aiErrors > 0)) {
+          $('error-banner-container').innerHTML =
+            `<div class="error-banner">⚠ ${h.discardErrors + h.injectErrors + h.aiErrors} recent errors. ` +
+            `<a href="#" id="view-errors">View details</a>` +
+            `</div>`;
+          document.getElementById('view-errors')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            chrome.tabs.create({ url: 'diagnostics.html' });
+            window.close();
+          });
+        }
+      });
+      return;
+    }
+    $('error-banner-container').innerHTML = errors.map(e =>
+      `<div class="error-banner">🔴 ${e.message} <span class="dismiss" data-ts="${e.ts}">✕</span></div>`
+    ).join('');
+    document.querySelectorAll('.dismiss').forEach(el => {
+      el.addEventListener('click', () => {
+        chrome.runtime.sendMessage({ method: 'clear-badge' }, () => {
+          $('error-banner-container').innerHTML = '';
+        });
+      });
+    });
+  });
+};
+showErrors();
+
 // ─── Phase 1/2: Settings ──────────────────────────────────────────────────
 
 chrome.storage.local.get(DEFAULTS, prefs => {

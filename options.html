@@ -191,106 +191,159 @@
 <body>
   <h2>🟡 TabAmber Settings</h2>
 
-  <h3>Timing</h3>
-  <div class="row">
-    <label>Suspend tabs inactive for <input type="number" id="period" min="1" max="1440"> minutes</label>
+  <!-- Tab navigation -->
+  <div style="display:flex;gap:4px;margin-bottom:20px;border-bottom:2px solid #eee;padding-bottom:0;">
+    <button class="tab-btn active" data-tab="settings"
+      style="padding:8px 16px;border:none;background:none;cursor:pointer;font-size:14px;border-bottom:2px solid #1a73e8;color:#1a73e8;margin-bottom:-2px;">Settings</button>
+    <button class="tab-btn" data-tab="notifications"
+      style="padding:8px 16px;border:none;background:none;cursor:pointer;font-size:14px;border-bottom:2px solid transparent;color:#888;margin-bottom:-2px;">Notifications</button>
+    <button class="tab-btn" data-tab="diagnostics"
+      style="padding:8px 16px;border:none;background:none;cursor:pointer;font-size:14px;border-bottom:2px solid transparent;color:#888;margin-bottom:-2px;">Diagnostics</button>
   </div>
-  <p class="hint">Tabs you haven't visited in this long will be suspended. They stay in your tab bar and reload when
-    clicked.</p>
 
-  <h3>Never Suspend</h3>
-  <label><input type="checkbox" id="pinned"> <span>Pinned tabs</span></label>
-  <label><input type="checkbox" id="audio"> <span>Tabs playing audio</span></label>
-  <label><input type="checkbox" id="paused"> <span>Tabs with a paused media player</span></label>
-  <label><input type="checkbox" id="forms"> <span>Tabs with unsaved form data</span></label>
+  <div id="tab-settings" class="tab-content">
 
-  <h3>Whitelist</h3>
-  <textarea id="whitelist" placeholder="gmail.com&#10;calendar.google.com&#10;notion.so"></textarea>
-  <p class="hint">One hostname per line. Subdomains are matched automatically (e.g. "google.com" also covers
-    mail.google.com).</p>
-
-  <h3>System Idle</h3>
-  <label><input type="checkbox" id="idle_only"> <span>Only suspend tabs when system is idle</span></label>
-  <div class="indent">
+    <h3>Timing</h3>
     <div class="row">
-      <label>Consider idle after <input type="number" id="idle_timeout" min="1" max="60"> minutes of no input</label>
+      <label>Suspend tabs inactive for <input type="number" id="period" min="1" max="1440"> minutes</label>
     </div>
-  </div>
+    <p class="hint">Tabs you haven't visited in this long will be suspended. They stay in your tab bar and reload when
+      clicked.</p>
 
-  <h3>Memory Guard</h3>
-  <label><input type="checkbox" id="memory_enabled"> <span>Force-suspend tabs using more than <input type="number"
-        id="memory_mb" min="100" max="10000"> MB — regardless of time</span></label>
-  <p class="hint">Useful safety net: any tab leaking memory gets suspended immediately even if recently visited.</p>
+    <h3>Never Suspend</h3>
+    <label><input type="checkbox" id="pinned"> <span>Pinned tabs</span></label>
+    <label><input type="checkbox" id="audio"> <span>Tabs playing audio</span></label>
+    <label><input type="checkbox" id="paused"> <span>Tabs with a paused media player</span></label>
+    <label><input type="checkbox" id="forms"> <span>Tabs with unsaved form data</span></label>
 
-  <h3>Tab Grouping (Phase 2)</h3>
-  <label><input type="checkbox" id="auto_group"> <span>Enable local tab clustering</span></label>
-  <div class="indent">
-    <div class="row">
-      <label>Similarity threshold: <input type="number" id="cluster_threshold" min="10" max="90" step="5">%</label>
-    </div>
-    <p class="hint">Higher = stricter grouping. Tabs must share more keywords to be grouped together. Recommended: 35%.
-    </p>
-  </div>
-  <p class="hint">Uses only public meta tags (og:type, keywords, site name). No URLs, titles, or personal data. Groups
-    are created locally — no AI call needed.</p>
+    <h3>Whitelist</h3>
+    <textarea id="whitelist" placeholder="gmail.com&#10;calendar.google.com&#10;notion.so"></textarea>
+    <p class="hint">One hostname per line. Subdomains are matched automatically (e.g. "google.com" also covers
+      mail.google.com).</p>
 
-  <h3>Startup</h3>
-  <label><input type="checkbox" id="suspend_on_startup"> <span>Suspend all tabs immediately when browser
-      starts</span></label>
-  <p class="hint">If unchecked, normal time-based rules apply after startup.</p>
-
-  <!-- Phase 3: AI Intelligence Layer -->
-  <div class="ai-section">
-    <h3>🤖 AI Intelligence Layer (Phase 3)</h3>
-    <p class="hint">Connect to your AI provider for pruning suggestions, usage habits, and smarter group names. Only
-      categorization signals are sent — never URLs, titles, or personal data.</p>
-
-    <div class="ai-field">
-      <label for="ai_endpoint">API Endpoint</label>
-      <input type="text" id="ai_endpoint" placeholder="http://localhost:3000/api">
-      <p class="hint">Your Open WebUI or any OpenAI-compatible endpoint.</p>
-    </div>
-
-    <div class="ai-field">
-      <label for="ai_api_key">API Key <span style="font-weight:normal;color:#888">(session-only — not
-          saved)</span></label>
-      <input type="password" id="ai_api_key" placeholder="Enter API key for this session">
-    </div>
-
-    <div class="ai-field">
-      <label for="ai_model">Model</label>
-      <select id="ai_model">
-        <option value="">— connect to endpoint first —</option>
-      </select>
-      <button type="button" class="ai-test-btn" id="ai_fetch_models">Fetch Models</button>
-      <span id="ai_status" class="ai-status disconnected">Not connected</span>
-    </div>
-
-    <div class="ai-field">
-      <label>Data Sent to AI</label>
+    <h3>System Idle</h3>
+    <label><input type="checkbox" id="idle_only"> <span>Only suspend tabs when system is idle</span></label>
+    <div class="indent">
       <div class="row">
-        <label><input type="radio" name="ai_data_level" value="categories_only" checked> Categories + keywords
-          only</label>
-        <label><input type="radio" name="ai_data_level" value="include_site_name"> Include site names</label>
+        <label>Consider idle after <input type="number" id="idle_timeout" min="1" max="60"> minutes of no input</label>
       </div>
-      <p class="hint">Never sends URLs, tab titles, or user content.</p>
     </div>
 
-    <div class="ai-field">
-      <label>Enable AI Features</label>
-      <div class="feature-toggles">
-        <label><input type="checkbox" id="ai_pruning"> Pruning suggestions</label>
-        <label><input type="checkbox" id="ai_habit"> Usage habit analysis</label>
-        <label><input type="checkbox" id="ai_naming"> Group name refinement</label>
-        <label><input type="checkbox" id="ai_digest"> Session digest</label>
-        <label><input type="checkbox" id="ai_anomaly"> Anomaly alerts</label>
+    <h3>Memory Guard</h3>
+    <label><input type="checkbox" id="memory_enabled"> <span>Force-suspend tabs using more than <input type="number"
+          id="memory_mb" min="100" max="10000"> MB — regardless of time</span></label>
+    <p class="hint">Useful safety net: any tab leaking memory gets suspended immediately even if recently visited.</p>
+
+    <h3>Tab Grouping (Phase 2)</h3>
+    <label><input type="checkbox" id="auto_group"> <span>Enable local tab clustering</span></label>
+    <div class="indent">
+      <div class="row">
+        <label>Similarity threshold: <input type="number" id="cluster_threshold" min="10" max="90" step="5">%</label>
       </div>
+      <p class="hint">Higher = stricter grouping. Tabs must share more keywords to be grouped together. Recommended:
+        35%.
+      </p>
+    </div>
+    <p class="hint">Uses only public meta tags (og:type, keywords, site name). No URLs, titles, or personal data. Groups
+      are created locally — no AI call needed.</p>
+
+    <h3>Startup</h3>
+    <label><input type="checkbox" id="suspend_on_startup"> <span>Suspend all tabs immediately when browser
+        starts</span></label>
+    <p class="hint">If unchecked, normal time-based rules apply after startup.</p>
+
+    <!-- Phase 3: AI Intelligence Layer -->
+    <div class="ai-section">
+      <h3>🤖 AI Intelligence Layer (Phase 3)</h3>
+      <p class="hint">Connect to your AI provider for pruning suggestions, usage habits, and smarter group names. Only
+        categorization signals are sent — never URLs, titles, or personal data.</p>
+
+      <div class="ai-field">
+        <label for="ai_endpoint">API Endpoint</label>
+        <input type="text" id="ai_endpoint" placeholder="http://localhost:3000/api">
+        <p class="hint">Your Open WebUI or any OpenAI-compatible endpoint.</p>
+      </div>
+
+      <div class="ai-field">
+        <label for="ai_api_key">API Key <span style="font-weight:normal;color:#888">(session-only — not
+            saved)</span></label>
+        <input type="password" id="ai_api_key" placeholder="Enter API key for this session">
+      </div>
+
+      <div class="ai-field">
+        <label for="ai_model">Model</label>
+        <select id="ai_model">
+          <option value="">— connect to endpoint first —</option>
+        </select>
+        <button type="button" class="ai-test-btn" id="ai_fetch_models">Fetch Models</button>
+        <span id="ai_status" class="ai-status disconnected">Not connected</span>
+      </div>
+
+      <div class="ai-field">
+        <label>Data Sent to AI</label>
+        <div class="row">
+          <label><input type="radio" name="ai_data_level" value="categories_only" checked> Categories + keywords
+            only</label>
+          <label><input type="radio" name="ai_data_level" value="include_site_name"> Include site names</label>
+        </div>
+        <p class="hint">Never sends URLs, tab titles, or user content.</p>
+      </div>
+
+      <div class="ai-field">
+        <label>Enable AI Features</label>
+        <div class="feature-toggles">
+          <label><input type="checkbox" id="ai_pruning"> Pruning suggestions</label>
+          <label><input type="checkbox" id="ai_habit"> Usage habit analysis</label>
+          <label><input type="checkbox" id="ai_naming"> Group name refinement</label>
+          <label><input type="checkbox" id="ai_digest"> Session digest</label>
+          <label><input type="checkbox" id="ai_anomaly"> Anomaly alerts</label>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <button id="save">Save Settings</button>
+      <span class="saved" id="saved">✓ Saved</span>
     </div>
   </div>
 
-  <div>
-    <button id="save">Save Settings</button>
-    <span class="saved" id="saved">✓ Saved</span>
+  <!-- Notifications tab -->
+  <div id="tab-notifications" class="tab-content" style="display:none;">
+    <h3>Notification Preferences</h3>
+    <label><input type="checkbox" id="notif_badge"> <span>Show badge count on extension icon</span></label>
+    <p class="hint">Orange/red number shows pending warnings and errors.</p>
+
+    <label><input type="checkbox" id="notif_chrome"> <span>Show Chrome system notifications</span></label>
+    <p class="hint">Persistent notifications for errors that need your attention.</p>
+
+    <h3>Log Level</h3>
+    <select id="log_level" style="padding:6px 8px;border:1px solid #ccc;border-radius:4px;">
+      <option value="silent">Silent</option>
+      <option value="error">Errors Only</option>
+      <option value="warn">Warnings + Errors</option>
+      <option value="info">Info + Up (default)</option>
+      <option value="debug">Debug + Up (verbose)</option>
+    </select>
+
+    <h3>Log Webhook (optional)</h3>
+    <input type="text" id="log_webhook" placeholder="http://localhost:7777/log"
+      style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:4px;font-family:monospace;">
+    <p class="hint">Stream logs to a local HTTP endpoint. Useful for piping to VSCode Output panel.</p>
+
+    <div style="margin-top:20px;">
+      <button id="test-notif">Test Notification</button>
+      <button id="clear-badge-btn" style="margin-left:8px;">Clear Badge</button>
+      <span class="saved" id="notif-saved">✓ Saved</span>
+    </div>
+  </div>
+
+  <!-- Diagnostics tab (redirects to dedicated page) -->
+  <div id="tab-diagnostics" class="tab-content" style="display:none;">
+    <h3>Diagnostics Dashboard</h3>
+    <p>For the full diagnostics dashboard with the log viewer, health metrics, and critical error panel:</p>
+    <button id="open-diagnostics" class="primary" style="margin-top:12px;">Open Diagnostics →</button>
+    <p class="hint" style="margin-top:12px;">The dedicated diagnostics page (diagnostics.html) provides a real-time log
+      viewer with filtering, health counters, and export.</p>
   </div>
 
   <script src="options.js"></script>

@@ -9,7 +9,8 @@
     "storage",
     "alarms",
     "scripting",
-    "idle"
+    "idle",
+    "notifications"
   ],
   "host_permissions": [
     "*://*/*"
