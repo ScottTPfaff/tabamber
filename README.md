@@ -114,9 +114,10 @@ API keys are **session-only** — stored in `chrome.storage.session`, cleared on
 ```
 tabamber/
 ├── manifest.json          # Extension manifest (MV3)
-├── sw.js                  # Service worker: suspension + clustering + AI routing
-├── popup.html / .js       # Toolbar popup: quick controls + auto group + AI actions
-├── options.html / .js     # Full settings page + AI connector config
+├── sw.js                  # Service worker: suspension + clustering + AI + health
+├── popup.html / .js       # Toolbar popup: quick controls + auto group + AI + error banner
+├── options.html / .js     # Full settings (3 tabs: Settings, Notifications, Diagnostics)
+├── diagnostics.html / .js # Dedicated diagnostics dashboard with log viewer
 ├── inject/
 │   ├── watch.js           # Tracks form input and last-visit time
 │   ├── meta.js            # Reads tab state (audible, paused, forms, memory)
@@ -124,8 +125,58 @@ tabamber/
 └── lib/
     ├── cluster.js         # Local keyword-frequency clustering algorithm
     ├── ai-connector.js    # OpenAI-compatible API connector
-    └── ai-prompts.js      # Prompt templates for all AI features
+    ├── ai-prompts.js      # Prompt templates for all AI features
+    ├── logger.js          # Structured logger: console + storage + webhook
+    ├── notifier.js        # 3-tier notifications: badge + Chrome + critical
+    └── health.js          # Uptime, counters, survives SW restarts
 ```
+
+---
+
+## Error Handling & Diagnostics
+
+TabAmber has **zero silent failures**. Every error is:
+
+1. **Logged** — structured logs with levels (debug/info/warn/error), stored in the last 100 entries
+2. **Counted** — health counters track every operation (suspends, groups, AI calls, errors)
+3. **Surfaced** — badge count on icon, Chrome notifications for errors, error banner in popup
+4. **Inspectable** — dedicated diagnostics page with real-time log viewer, filtering, and JSON export
+
+### Notification tiers
+
+| Severity | What you see |
+|----------|-------------|
+| Info | Popup status text |
+| Warning | Badge: `⚠2` — click to view details |
+| Error | Chrome notification, dismissible notification |
+| Critical | Chrome notification (persistent) + badge + popup blocks |
+
+### Log viewer
+
+- Filter by level (debug → error) or search text
+- Auto-refreshes every 3 seconds
+- Export all logs as JSON
+- Clear logs button
+
+### VSCode integration
+
+Set a webhook URL in Settings → Notifications → "Log Webhook" to stream logs to a local HTTP endpoint. Pipe it to a VSCode Output panel for real-time monitoring during development:
+
+```bash
+# Simple HTTP log receiver (run in VSCode terminal)
+python3 -c "
+import http.server, json, sys
+class H(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        data = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+        print(f'[{data[\"level\"].upper()}] {data[\"message\"]}')
+        self.send_response(200); self.end_headers()
+    def log_message(self, *a): pass
+http.server.HTTPServer(('127.0.0.1', 7777), H).serve_forever()
+"
+```
+
+Then set `http://127.0.0.1:7777/log` as the webhook URL in TabAmber settings.
 
 ---
 
@@ -134,9 +185,7 @@ tabamber/
 - [x] Phase 1: time-based tab suspension
 - [x] Phase 2: local tab clustering + group management
 - [x] Phase 3: AI connector (Open WebUI / Ollama / OpenAI / Anthropic)
-- [x] Phase 3: pruning suggestions
-- [x] Phase 3: anomaly detection
-- [x] Phase 3: session digest
+- [x] Phase 4: error handling, logging, notifications, diagnostics
 - [ ] Phase 2: search across suspended tabs
 - [ ] Phase 3: usage habit analysis + rule suggestions
 - [ ] Phase 3: stale group archiving to bookmark folders
