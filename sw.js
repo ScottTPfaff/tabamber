@@ -104,6 +104,49 @@ const check = async (forceAll = false) => {
 // Import clustering module (ESM in service worker requires dynamic import)
 const { clusterTabs, suspendGroup, wakeGroup } = await import('./lib/cluster.js');
 
+// ─── Phase 3: AI Intelligence Layer ───────────────────────────────────────
+
+// Import AI connector (ESM)
+const {
+  getAIConfig, saveAIConfig, fetchModels,
+  getPruningSuggestions, getHabitAnalysis, refineGroupNames,
+  getSessionDigest, getAnomalyAlerts
+} = await import('./lib/ai-connector.js');
+
+// Build enriched tab signals for AI (combining classify + local metadata)
+const buildAISignals = async () => {
+  const tabs = await chrome.tabs.query({ discarded: false, url: '*://*/*' });
+  const signals = [];
+
+  for (const tab of tabs) {
+    if (tab.active || tab.pinned) continue;
+
+    let signal = {};
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: tab.id, allFrames: false },
+        files: ['inject/classify.js']
+      });
+      if (results[0]?.result?.ready) {
+        signal = results[0].result;
+      } else continue;
+    } catch { continue; }
+
+    // Add local metadata
+    const createdDaysAgo = tab.lastAccessed ? Math.floor((Date.now() - tab.lastAccessed) / 86400000) : 0;
+    signals.push({
+      tabId: tab.id,
+      signal,
+      age: createdDaysAgo,
+      visits: 0, // TODO: track revisit count in storage
+      lastSeen: createdDaysAgo,
+      memory: tab.memory?.usedJSHeapSize || 0,
+    });
+  }
+
+  return signals;
+};
+
 // Scrape categorization signals from all non-discarded tabs
 const scrapeAllSignals = async () => {
   const tabs = await chrome.tabs.query({ discarded: false, url: '*://*/*' });
@@ -183,13 +226,15 @@ const wakeGroupById = async (groupId) => {
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   switch (request.method) {
+    // Phase 1
     case 'suspend-all':
       check(true);
       break;
 
+    // Phase 2
     case 'auto-group':
       autoGroup().then(sendResponse);
-      return true; // keep channel open for async response
+      return true;
 
     case 'suspend-group':
       suspendGroupById(request.groupId).then(() => sendResponse({ ok: true }));
@@ -201,6 +246,82 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     case 'get-groups':
       chrome.tabGroups.query({}).then(groups => sendResponse({ groups })).catch(() => sendResponse({ groups: [] }));
+      return true;
+
+    // Phase 3: AI
+    case 'ai-fetch-models':
+      fetchModels(request.endpoint, request.apiKey)
+        .then(models => sendResponse({ models }))
+        .catch(err => sendResponse({ models: [], error: err.message }));
+      return true;
+
+    case 'ai-pruning':
+      (async () => {
+        const config = await getAIConfig();
+        config.apiKey = request.apiKey; // session-only
+        if (!config.endpoint || !config.model) {
+          sendResponse({ error: 'AI not configured — set endpoint and model in settings' });
+          return;
+        }
+        const signals = await buildAISignals();
+        const result = await getPruningSuggestions(config, signals);
+        sendResponse(result);
+      })();
+      return true;
+
+    case 'ai-habits':
+      (async () => {
+        const config = await getAIConfig();
+        config.apiKey = request.apiKey;
+        if (!config.endpoint || !config.model) {
+          sendResponse({ error: 'AI not configured' });
+          return;
+        }
+        const history = request.tabHistory || [];
+        const result = await getHabitAnalysis(config, history);
+        sendResponse(result);
+      })();
+      return true;
+
+    case 'ai-refine-names':
+      (async () => {
+        const config = await getAIConfig();
+        config.apiKey = request.apiKey;
+        if (!config.endpoint || !config.model) {
+          sendResponse({ error: 'AI not configured' });
+          return;
+        }
+        const result = await refineGroupNames(config, request.groups || []);
+        sendResponse({ groups: result });
+      })();
+      return true;
+
+    case 'ai-digest':
+      (async () => {
+        const config = await getAIConfig();
+        config.apiKey = request.apiKey;
+        if (!config.endpoint || !config.model) {
+          sendResponse({ error: 'AI not configured' });
+          return;
+        }
+        const signals = await buildAISignals();
+        const result = await getSessionDigest(config, signals, request.stats || {});
+        sendResponse({ digest: result });
+      })();
+      return true;
+
+    case 'ai-anomaly':
+      (async () => {
+        const config = await getAIConfig();
+        config.apiKey = request.apiKey;
+        if (!config.endpoint || !config.model) {
+          sendResponse({ error: 'AI not configured' });
+          return;
+        }
+        const signals = await buildAISignals();
+        const result = await getAnomalyAlerts(config, signals);
+        sendResponse(result);
+      })();
       return true;
   }
 });

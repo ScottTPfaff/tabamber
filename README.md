@@ -56,15 +56,9 @@ Only public meta tags are read. No URLs, no page titles, no user content ever le
 
 ---
 
-## Phase 3 — AI Intelligence Layer (coming)
+## Phase 3 — AI Intelligence Layer ✅
 
-Connects to your AI provider of choice for features that benefit from real intelligence:
-
-- **Pruning suggestions** — "These 12 tabs are 47 days old and you have newer ones on the same topic. Prune?"
-- **Usage habit analysis** — learns your patterns, suggests personalized suspension rules
-- **Group name refinement** — better group names than raw keyword matching
-- **Session digest** — end-of-day summary of your browsing threads
-- **Stale group detection** — archive or delete groups you haven't touched in weeks
+Connects to your AI provider of choice for features that benefit from real intelligence. One endpoint, any model.
 
 **Supported providers:**
 
@@ -74,7 +68,30 @@ Connects to your AI provider of choice for features that benefit from real intel
 - Anthropic
 - Any OpenAI-compatible endpoint
 
-**Privacy model:** only categorization signals are sent (site category, content type, keywords). Never URLs, never tab titles, never user content.
+### Features
+
+- **Pruning suggestions** — "These 12 tabs are 47 days old and you have newer ones on the same topic. Prune?"
+- **Usage habit analysis** — learns your patterns, suggests personalized suspension rules
+- **Group name refinement** — better group names than raw keyword matching
+- **Session digest** — end-of-day summary of your browsing threads
+- **Anomaly detection** — memory hogs, zombie tabs, orphan tabs flagged for review
+
+### Privacy model
+
+**Only categorization signals are sent** — site category, content type, keywords. Never URLs, never tab titles, never user content. You control the data level:
+
+- **Categories + keywords only** — most private, just topic signals
+- **Include site names** — adds site context (e.g., "GitHub", "YouTube") for better analysis
+
+API keys are **session-only** — stored in `chrome.storage.session`, cleared on browser close.
+
+### Setup
+
+1. Open TabAmber settings → AI Intelligence Layer
+2. Enter your endpoint (e.g., `http://localhost:3000/api` for Open WebUI)
+3. Click "Fetch Models" to populate the model dropdown
+4. Enter your API key (session-only)
+5. Toggle which AI features you want enabled
 
 ---
 
@@ -97,15 +114,17 @@ Connects to your AI provider of choice for features that benefit from real intel
 ```
 tabamber/
 ├── manifest.json          # Extension manifest (MV3)
-├── sw.js                  # Service worker: suspension + clustering + message handling
-├── popup.html / .js       # Toolbar popup: quick controls + auto group
-├── options.html / .js     # Full settings page
+├── sw.js                  # Service worker: suspension + clustering + AI routing
+├── popup.html / .js       # Toolbar popup: quick controls + auto group + AI actions
+├── options.html / .js     # Full settings page + AI connector config
 ├── inject/
 │   ├── watch.js           # Tracks form input and last-visit time
 │   ├── meta.js            # Reads tab state (audible, paused, forms, memory)
 │   └── classify.js        # Scrapes public meta tags for categorization
 └── lib/
-    └── cluster.js         # Local keyword-frequency clustering algorithm
+    ├── cluster.js         # Local keyword-frequency clustering algorithm
+    ├── ai-connector.js    # OpenAI-compatible API connector
+    └── ai-prompts.js      # Prompt templates for all AI features
 ```
 
 ---
@@ -114,11 +133,12 @@ tabamber/
 
 - [x] Phase 1: time-based tab suspension
 - [x] Phase 2: local tab clustering + group management
+- [x] Phase 3: AI connector (Open WebUI / Ollama / OpenAI / Anthropic)
+- [x] Phase 3: pruning suggestions
+- [x] Phase 3: anomaly detection
+- [x] Phase 3: session digest
 - [ ] Phase 2: search across suspended tabs
-- [ ] Phase 3: AI connector (Open WebUI / Ollama / OpenAI / Anthropic)
-- [ ] Phase 3: pruning suggestions
 - [ ] Phase 3: usage habit analysis + rule suggestions
-- [ ] Phase 3: session digest
 - [ ] Phase 3: stale group archiving to bookmark folders
 
 ---

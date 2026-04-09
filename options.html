@@ -97,6 +97,94 @@
     .indent {
       margin-left: 24px;
     }
+
+    /* Phase 3: AI section */
+    .ai-section {
+      background: #f8f6f0;
+      border: 1px solid #e8e0d0;
+      border-radius: 8px;
+      padding: 16px;
+      margin: 16px 0;
+    }
+
+    .ai-section h3 {
+      margin-top: 0;
+      color: #8b6914;
+    }
+
+    .ai-field {
+      margin: 10px 0;
+    }
+
+    .ai-field label {
+      font-size: 13px;
+      font-weight: bold;
+      margin-bottom: 4px;
+    }
+
+    .ai-field input[type=text],
+    .ai-field input[type=password],
+    .ai-field select {
+      width: 100%;
+      padding: 6px 8px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-size: 13px;
+      font-family: monospace;
+    }
+
+    .ai-field .hint {
+      margin-top: 4px;
+    }
+
+    .feature-toggles {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      margin: 10px 0;
+    }
+
+    .feature-toggles label {
+      font-size: 13px;
+      margin: 0;
+    }
+
+    .ai-status {
+      font-size: 12px;
+      padding: 4px 8px;
+      border-radius: 4px;
+      display: inline-block;
+    }
+
+    .ai-status.connected {
+      background: #e8f5e9;
+      color: #2e7d32;
+    }
+
+    .ai-status.disconnected {
+      background: #fff3e0;
+      color: #e65100;
+    }
+
+    .ai-test-btn {
+      padding: 5px 12px;
+      font-size: 12px;
+      background: #d4a017;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      margin-top: 8px;
+    }
+
+    .ai-test-btn:hover {
+      background: #b8920f;
+    }
+
+    .ai-test-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
   </style>
 </head>
 
@@ -150,6 +238,55 @@
   <label><input type="checkbox" id="suspend_on_startup"> <span>Suspend all tabs immediately when browser
       starts</span></label>
   <p class="hint">If unchecked, normal time-based rules apply after startup.</p>
+
+  <!-- Phase 3: AI Intelligence Layer -->
+  <div class="ai-section">
+    <h3>🤖 AI Intelligence Layer (Phase 3)</h3>
+    <p class="hint">Connect to your AI provider for pruning suggestions, usage habits, and smarter group names. Only
+      categorization signals are sent — never URLs, titles, or personal data.</p>
+
+    <div class="ai-field">
+      <label for="ai_endpoint">API Endpoint</label>
+      <input type="text" id="ai_endpoint" placeholder="http://localhost:3000/api">
+      <p class="hint">Your Open WebUI or any OpenAI-compatible endpoint.</p>
+    </div>
+
+    <div class="ai-field">
+      <label for="ai_api_key">API Key <span style="font-weight:normal;color:#888">(session-only — not
+          saved)</span></label>
+      <input type="password" id="ai_api_key" placeholder="Enter API key for this session">
+    </div>
+
+    <div class="ai-field">
+      <label for="ai_model">Model</label>
+      <select id="ai_model">
+        <option value="">— connect to endpoint first —</option>
+      </select>
+      <button type="button" class="ai-test-btn" id="ai_fetch_models">Fetch Models</button>
+      <span id="ai_status" class="ai-status disconnected">Not connected</span>
+    </div>
+
+    <div class="ai-field">
+      <label>Data Sent to AI</label>
+      <div class="row">
+        <label><input type="radio" name="ai_data_level" value="categories_only" checked> Categories + keywords
+          only</label>
+        <label><input type="radio" name="ai_data_level" value="include_site_name"> Include site names</label>
+      </div>
+      <p class="hint">Never sends URLs, tab titles, or user content.</p>
+    </div>
+
+    <div class="ai-field">
+      <label>Enable AI Features</label>
+      <div class="feature-toggles">
+        <label><input type="checkbox" id="ai_pruning"> Pruning suggestions</label>
+        <label><input type="checkbox" id="ai_habit"> Usage habit analysis</label>
+        <label><input type="checkbox" id="ai_naming"> Group name refinement</label>
+        <label><input type="checkbox" id="ai_digest"> Session digest</label>
+        <label><input type="checkbox" id="ai_anomaly"> Anomaly alerts</label>
+      </div>
+    </div>
+  </div>
 
   <div>
     <button id="save">Save Settings</button>
