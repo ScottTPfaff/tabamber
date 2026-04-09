@@ -185,6 +185,81 @@
       opacity: 0.5;
       cursor: not-allowed;
     }
+
+    /* Dark mode */
+    @media (prefers-color-scheme: dark) {
+      body {
+        background: #1e1e1e;
+        color: #d4d4d4;
+      }
+
+      h2 {
+        border-color: #404040;
+      }
+
+      h3 {
+        color: #aaa;
+      }
+
+      input[type=number],
+      textarea,
+      select,
+      .ai-field input[type=text],
+      .ai-field input[type=password],
+      .ai-field select {
+        background: #2d2d2d;
+        color: #d4d4d4;
+        border-color: #555;
+      }
+
+      button {
+        background: #1a73e8;
+      }
+
+      button:hover {
+        background: #1558b0;
+      }
+
+      .ai-section {
+        background: #2a2520;
+        border-color: #4a4030;
+      }
+
+      .ai-section h3 {
+        color: #d4a017;
+      }
+
+      .hint {
+        color: #888;
+      }
+
+      .saved {
+        color: #4caf50;
+      }
+
+      .ai-status.connected {
+        background: #1b3a1b;
+        color: #4caf50;
+      }
+
+      .ai-status.disconnected {
+        background: #3a2a10;
+        color: #ff9800;
+      }
+
+      .tab-btn {
+        color: #888;
+      }
+
+      .tab-btn[style*="1a73e8"] {
+        color: #64b5f6 !important;
+      }
+
+      #critical-panel {
+        background: #3a2a10;
+        border-color: #5a4a20;
+      }
+    }
   </style>
 </head>
 
@@ -325,6 +400,11 @@
       <option value="debug">Debug + Up (verbose)</option>
     </select>
 
+    <div class="row" style="margin-top:10px;">
+      <label>Max log entries: <input type="number" id="log_max_entries" min="20" max="500" step="10"
+          style="width:70px;"></label>
+    </div>
+
     <h3>Log Webhook (optional)</h3>
     <input type="text" id="log_webhook" placeholder="http://localhost:7777/log"
       style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:4px;font-family:monospace;">
@@ -335,6 +415,14 @@
       <button id="clear-badge-btn" style="margin-left:8px;">Clear Badge</button>
       <span class="saved" id="notif-saved">✓ Saved</span>
     </div>
+
+    <h3 style="margin-top:28px;">Import / Export Settings</h3>
+    <div class="row" style="gap:8px;">
+      <button id="export-settings">Export Settings (JSON)</button>
+      <button id="import-settings">Import Settings (JSON)</button>
+      <input type="file" id="import-file" accept=".json" style="display:none;">
+    </div>
+    <p class="hint">Export your settings to a JSON file for backup or to transfer to another browser.</p>
   </div>
 
   <!-- Diagnostics tab (redirects to dedicated page) -->

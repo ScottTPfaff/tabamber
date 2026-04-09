@@ -6,7 +6,7 @@ const IS_FIREFOX = typeof browser !== 'undefined';
 const log = (await import('./lib/logger.js')).default;
 const notifier = (await import('./lib/notifier.js')).default;
 const health = (await import('./lib/health.js')).default;
-const { clusterTabs, suspendGroup, wakeGroup } = await import('./lib/cluster.js');
+const { clusterTabs } = await import('./lib/cluster.js');
 const {
   getAIConfig, saveAIConfig, fetchModels,
   getPruningSuggestions, getHabitAnalysis, refineGroupNames,
@@ -83,6 +83,13 @@ const safeInject = async (tabId, file) => {
 
 const check = async (forceAll = false) => {
   try {
+    // Check if suspension is paused
+    const sessionState = await chrome.storage.session.get({ suspension_paused: false });
+    if (sessionState.suspension_paused && !forceAll) {
+      log.debug('Suspension is paused, skipping');
+      return;
+    }
+
     const prefs = await getPrefs();
 
     // if idle_only, skip unless system is idle
@@ -157,6 +164,7 @@ const check = async (forceAll = false) => {
         health.inc('tabsSuspended');
         tabsDiscard(tab.id);
         suspended++;
+        await new Promise(r => setTimeout(r, 50)); // prevent Chrome same-process race
         continue;
       }
 
@@ -168,6 +176,7 @@ const check = async (forceAll = false) => {
       health.inc('tabsSuspended');
       tabsDiscard(tab.id);
       suspended++;
+      await new Promise(r => setTimeout(r, 50)); // prevent Chrome same-process race
     }
 
     log.info(`Suspend check complete: ${suspended} suspended, ${skipped} skipped`);
@@ -490,9 +499,103 @@ chrome.alarms.onAlarm.addListener(alarm => {
   if (alarm.name === 'suspend.check') check();
 });
 
+// ─── Context menu ──────────────────────────────────────────────────────────
+
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.contextMenus.create({
+    id: 'tabamber-never-suspend',
+    title: 'TabAmber: Never suspend this tab',
+    contexts: ['page'],
+  });
+  chrome.contextMenus.create({
+    id: 'tabamber-suspend-now',
+    title: 'TabAmber: Suspend this tab now',
+    contexts: ['page'],
+  });
+  chrome.contextMenus.create({
+    id: 'tabamber-whitelist-add',
+    title: 'TabAmber: Add site to whitelist',
+    contexts: ['page'],
+  });
+  chrome.contextMenus.create({
+    id: 'tabamber-separator',
+    type: 'separator',
+    contexts: ['page'],
+  });
+  chrome.contextMenus.create({
+    id: 'tabamber-open-diagnostics',
+    title: 'TabAmber: Open Diagnostics',
+    contexts: ['action'],
+  });
+});
+
+chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+  switch (info.menuItemId) {
+    case 'tabamber-never-suspend':
+      try {
+        const { hostname } = new URL(tab.url);
+        const prefs = await getPrefs();
+        if (!prefs.whitelist.includes(hostname)) {
+          prefs.whitelist.push(hostname);
+          chrome.storage.local.set({ whitelist: prefs.whitelist });
+          notifier.info(`Added ${hostname} to whitelist`);
+        }
+      } catch { }
+      break;
+    case 'tabamber-suspend-now':
+      log.info(`Context menu: suspending tab ${tab.id}`);
+      health.inc('tabsSuspended');
+      tabsDiscard(tab.id);
+      break;
+    case 'tabamber-whitelist-add':
+      try {
+        const { hostname } = new URL(tab.url);
+        const prefs = await getPrefs();
+        if (!prefs.whitelist.includes(hostname)) {
+          prefs.whitelist.push(hostname);
+          chrome.storage.local.set({ whitelist: prefs.whitelist });
+          notifier.info(`Added ${hostname} to whitelist`);
+        } else {
+          notifier.info(`${hostname} is already whitelisted`);
+        }
+      } catch { }
+      break;
+    case 'tabamber-open-diagnostics':
+      chrome.tabs.create({ url: 'diagnostics.html' });
+      break;
+  }
+});
+
+// ─── Keyboard shortcuts ────────────────────────────────────────────────────
+
+chrome.commands.onCommand.addListener(async (command) => {
+  switch (command) {
+    case 'suspend-all':
+      log.info('Keyboard shortcut: suspend all');
+      check(true);
+      break;
+    case 'auto-group':
+      log.info('Keyboard shortcut: auto-group');
+      autoGroup();
+      break;
+    case 'toggle-pause':
+      const stored = await chrome.storage.session.get({ suspension_paused: false });
+      const paused = !stored.suspension_paused;
+      await chrome.storage.session.set({ suspension_paused: paused });
+      notifier.info(paused ? 'Suspension paused' : 'Suspension resumed');
+      if (paused) {
+        chrome.action.setBadgeText({ text: '⏸' });
+        chrome.action.setBadgeBackgroundColor({ color: '#666' });
+      } else {
+        chrome.action.setBadgeText({ text: '' });
+      }
+      log.info(`Suspension ${paused ? 'paused' : 'resumed'}`);
+      break;
+  }
+});
+
 chrome.runtime.onStartup.addListener(async () => {
   log.info('Browser startup');
-  health.inc('tabsSuspended', 0); // reset doesn't inc, just marks init
   const prefs = await getPrefs();
   if (prefs.suspend_on_startup) check(true);
   else check();

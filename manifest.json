@@ -3,6 +3,22 @@
   "name": "TabAmber",
   "version": "1.0.0",
   "description": "Your tabs, preserved in amber. Suspends inactive tabs by time with no count limits. Chrome and Firefox.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "TabAmber",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
   "permissions": [
     "tabs",
     "tabGroups",
@@ -10,7 +26,8 @@
     "alarms",
     "scripting",
     "idle",
-    "notifications"
+    "notifications",
+    "contextMenus"
   ],
   "host_permissions": [
     "*://*/*"
@@ -43,6 +60,29 @@
     "gecko": {
       "id": "tab-suspender@local",
       "strict_min_version": "109.0"
+    }
+  },
+  "commands": {
+    "suspend-all": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+S",
+        "mac": "Command+Shift+S"
+      },
+      "description": "Suspend all inactive tabs now"
+    },
+    "auto-group": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+G",
+        "mac": "Command+Shift+G"
+      },
+      "description": "Auto-group open tabs by topic"
+    },
+    "toggle-pause": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+P",
+        "mac": "Command+Shift+P"
+      },
+      "description": "Pause/resume tab suspension"
     }
   }
 }

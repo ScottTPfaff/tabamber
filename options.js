@@ -223,3 +223,47 @@ $('clear-badge-btn').addEventListener('click', () => {
 $('open-diagnostics').addEventListener('click', () => {
   chrome.tabs.create({ url: 'diagnostics.html' });
 });
+
+// ─── Import / Export Settings ─────────────────────────────────────────────
+
+$('export-settings').addEventListener('click', () => {
+  chrome.storage.local.get(null, prefs => {
+    // Don't export logs or API keys
+    const safe = { ...prefs };
+    delete safe.log_entries;
+    delete safe.ai_api_key;
+    delete safe.notification_badge_count;
+    delete safe.critical_errors;
+    delete safe.health_state;
+
+    const blob = new Blob([JSON.stringify(safe, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `tabamber-settings-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+});
+
+$('import-settings').addEventListener('click', () => {
+  $('import-file').click();
+});
+
+$('import-file').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    try {
+      const prefs = JSON.parse(ev.target.result);
+      chrome.storage.local.set(prefs, () => {
+        alert(`Imported ${Object.keys(prefs).length} settings. Reload the extension to apply changes.`);
+        location.reload();
+      });
+    } catch {
+      alert('Invalid settings file.');
+    }
+  };
+  reader.readAsText(file);
+});

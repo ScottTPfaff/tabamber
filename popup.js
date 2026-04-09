@@ -104,7 +104,10 @@ const renderGroups = (groups) => {
 
 chrome.runtime.sendMessage({ method: 'get-groups' }, response => {
   if (response?.groups) {
-    renderGroups(response.groups.map(g => ({ title: g.title, tabCount: g.tabCount })));
+    renderGroups(response.groups.map(g => ({
+      title: g.title,
+      tabCount: (g.tabIds || []).length
+    })));
   }
 });
 

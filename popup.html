@@ -173,6 +173,89 @@
       color: #1a73e8;
       text-decoration: underline;
     }
+
+    /* Dark mode */
+    @media (prefers-color-scheme: dark) {
+      body {
+        background: #1e1e1e;
+        color: #d4d4d4;
+      }
+
+      .divider {
+        border-color: #404040;
+      }
+
+      .period-row input {
+        background: #2d2d2d;
+        color: #d4d4d4;
+        border-color: #555;
+      }
+
+      .toggle-row {
+        color: #d4d4d4;
+      }
+
+      button {
+        background: #2d2d2d;
+        color: #d4d4d4;
+        border-color: #555;
+      }
+
+      button:hover {
+        background: #3d3d3d;
+      }
+
+      button.primary {
+        background: #1a73e8;
+      }
+
+      button.amber {
+        background: #b8920f;
+        border-color: #997a0c;
+      }
+
+      button.amber:hover {
+        background: #997a0c;
+      }
+
+      .group-chip {
+        background: #2d2d2d;
+        color: #d4d4d4;
+      }
+
+      .group-chip .count {
+        color: #888;
+      }
+
+      #ai-section button {
+        background: #2d2d2d;
+        color: #d4d4d4;
+        border-color: #555;
+      }
+
+      #ai-section button.amber {
+        color: #fff;
+      }
+
+      #ai-result {
+        background: #2d2d2d;
+        color: #d4d4d4;
+      }
+
+      .error-banner {
+        background: #3d1a1a;
+        border-color: #6d2a2a;
+        color: #ff8a80;
+      }
+
+      .error-banner a {
+        color: #64b5f6;
+      }
+
+      #diag-link {
+        color: #888;
+      }
+    }
   </style>
 </head>
 
