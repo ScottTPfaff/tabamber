@@ -18,7 +18,7 @@ You're not a person who has too many tabs. You're a person who uses tabs as a **
 
 ---
 
-## Phase 1 — Time-Based Suspension (current)
+## Phase 1 — Time-Based Suspension ✅
 
 - Suspends tabs inactive beyond a configurable time threshold (default: 60 min)
 - No tab count limits — ever
@@ -32,15 +32,27 @@ You're not a person who has too many tabs. You're a person who uses tabs as a **
 
 ---
 
-## Phase 2 — Local Clustering & Tab Groups (coming)
+## Phase 2 — Local Clustering & Tab Groups ✅
 
-- Scrapes categorization signals from each tab (og:type, og:site_name, keywords, description)
-- Clusters tabs locally by topic using keyword frequency — no network call, no AI required
-- Creates Chrome/Firefox tab groups automatically
-- Suspend entire groups as a single unit — one group chip instead of 20 tabs
-- Wake an entire group with one click
+- **Auto Group** button in the popup — one click to organize all open tabs
+- Scrapes only public categorization signals from each tab (og:type, og:site_name, keywords, description) — **no URLs, no titles, no personal data**
+- Clusters tabs locally using keyword-frequency similarity — **no network call, no AI required**
+- Creates native browser tab groups automatically with intelligent names
+- Similarity threshold configurable (default: 35%) — higher = stricter grouping
+- Group chips replace 20 tabs with 1 slot in your tab bar
+- Click a group to expand — all tabs wake up
 
-**Privacy:** only public meta tags are read. No URLs, no titles, no user content leave the extension.
+### How the clustering works
+
+1. Reads public meta tags from every open tab
+2. Computes pairwise similarity: site match (40%), type match (15%), section match (15%), keyword Jaccard overlap (30%)
+3. Greedy agglomerative clustering merges tabs above the threshold
+4. Groups are named from the dominant site or top keywords
+5. Singleton tabs are collected into a "Miscellaneous" group
+
+### Privacy
+
+Only public meta tags are read. No URLs, no page titles, no user content ever leave the extension. Grouping runs entirely in the service worker.
 
 ---
 
@@ -55,6 +67,7 @@ Connects to your AI provider of choice for features that benefit from real intel
 - **Stale group detection** — archive or delete groups you haven't touched in weeks
 
 **Supported providers:**
+
 - [Open WebUI](https://github.com/open-webui/open-webui) (recommended — one endpoint, 100+ models)
 - Ollama (local, zero data leaves machine)
 - OpenAI
@@ -68,19 +81,39 @@ Connects to your AI provider of choice for features that benefit from real intel
 ## Installation
 
 ### Chrome
+
 1. `chrome://extensions/` → Enable Developer mode
 2. "Load unpacked" → select the `tabamber/` directory
 
 ### Firefox
+
 1. `about:debugging` → This Firefox → Load Temporary Add-on
 2. Select `manifest.json`
 
 ---
 
+## Project Structure
+
+```
+tabamber/
+├── manifest.json          # Extension manifest (MV3)
+├── sw.js                  # Service worker: suspension + clustering + message handling
+├── popup.html / .js       # Toolbar popup: quick controls + auto group
+├── options.html / .js     # Full settings page
+├── inject/
+│   ├── watch.js           # Tracks form input and last-visit time
+│   ├── meta.js            # Reads tab state (audible, paused, forms, memory)
+│   └── classify.js        # Scrapes public meta tags for categorization
+└── lib/
+    └── cluster.js         # Local keyword-frequency clustering algorithm
+```
+
+---
+
 ## Roadmap
 
-- [ ] Phase 2: local tab clustering + group management
-- [ ] Phase 2: group-level suspend/wake
+- [x] Phase 1: time-based tab suspension
+- [x] Phase 2: local tab clustering + group management
 - [ ] Phase 2: search across suspended tabs
 - [ ] Phase 3: AI connector (Open WebUI / Ollama / OpenAI / Anthropic)
 - [ ] Phase 3: pruning suggestions

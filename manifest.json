@@ -3,18 +3,33 @@
   "name": "TabAmber",
   "version": "1.0.0",
   "description": "Your tabs, preserved in amber. Suspends inactive tabs by time with no count limits. Chrome and Firefox.",
-  "permissions": ["tabs", "storage", "alarms", "scripting", "idle"],
-  "host_permissions": ["*://*/*"],
+  "permissions": [
+    "tabs",
+    "tabGroups",
+    "storage",
+    "alarms",
+    "scripting",
+    "idle"
+  ],
+  "host_permissions": [
+    "*://*/*"
+  ],
   "background": {
     "service_worker": "sw.js"
   },
-  "content_scripts": [{
-    "matches": ["*://*/*"],
-    "match_about_blank": true,
-    "js": ["inject/watch.js"],
-    "run_at": "document_start",
-    "all_frames": true
-  }],
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*/*"
+      ],
+      "match_about_blank": true,
+      "js": [
+        "inject/watch.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ],
   "action": {
     "default_popup": "popup.html",
     "default_title": "TabAmber"

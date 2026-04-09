@@ -1,38 +1,157 @@
 <!DOCTYPE html>
 <html>
+
 <head>
   <meta charset="utf-8">
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: sans-serif; width: 240px; padding: 12px; color: #222; }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
 
-    .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
-    .header h3 { font-size: 14px; }
-    .status { font-size: 11px; color: #888; }
+    body {
+      font-family: sans-serif;
+      width: 260px;
+      padding: 12px;
+      color: #222;
+    }
 
-    .divider { border: none; border-top: 1px solid #eee; margin: 10px 0; }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
 
-    /* Quick toggle row */
-    .toggle-row { display: flex; justify-content: space-between; align-items: center;
-                  padding: 5px 0; font-size: 13px; }
-    .toggle-row input { cursor: pointer; }
+    .header h3 {
+      font-size: 14px;
+    }
 
-    /* Period quick-set */
-    .period-row { display: flex; align-items: center; gap: 6px; font-size: 13px; padding: 5px 0; }
-    .period-row input { width: 55px; padding: 3px 5px; border: 1px solid #ccc; border-radius: 3px; }
+    .status {
+      font-size: 11px;
+      color: #888;
+    }
 
-    hr.divider { margin: 10px 0; }
+    .divider {
+      border: none;
+      border-top: 1px solid #eee;
+      margin: 10px 0;
+    }
 
-    button { width: 100%; padding: 7px; margin-top: 5px; border: 1px solid #ccc;
-             border-radius: 4px; cursor: pointer; font-size: 13px; background: #f8f8f8; }
-    button:hover { background: #e8e8f0; }
-    button.primary { background: #1a73e8; color: #fff; border-color: #1a73e8; }
-    button.primary:hover { background: #1558b0; }
+    .toggle-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 5px 0;
+      font-size: 13px;
+    }
+
+    .toggle-row input {
+      cursor: pointer;
+    }
+
+    .period-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      padding: 5px 0;
+    }
+
+    .period-row input {
+      width: 55px;
+      padding: 3px 5px;
+      border: 1px solid #ccc;
+      border-radius: 3px;
+    }
+
+    /* Phase 2: Group status */
+    .groups-section {
+      margin-top: 4px;
+    }
+
+    .groups-section summary {
+      font-size: 12px;
+      color: #666;
+      cursor: pointer;
+      padding: 3px 0;
+    }
+
+    .group-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+      background: #f0f0f5;
+      border-radius: 10px;
+      padding: 2px 8px;
+      margin: 3px 2px;
+    }
+
+    .group-chip .count {
+      color: #888;
+    }
+
+    .group-chip .suspend-btn,
+    .group-chip .wake-btn {
+      cursor: pointer;
+      border: none;
+      background: none;
+      font-size: 11px;
+      padding: 0 2px;
+      color: #1a73e8;
+    }
+
+    .group-chip .suspend-btn:hover,
+    .group-chip .wake-btn:hover {
+      color: #0d47a1;
+    }
+
+    hr.divider {
+      margin: 10px 0;
+    }
+
+    button {
+      width: 100%;
+      padding: 7px;
+      margin-top: 5px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 13px;
+      background: #f8f8f8;
+    }
+
+    button:hover {
+      background: #e8e8f0;
+    }
+
+    button.primary {
+      background: #1a73e8;
+      color: #fff;
+      border-color: #1a73e8;
+    }
+
+    button.primary:hover {
+      background: #1558b0;
+    }
+
+    button.amber {
+      background: #d4a017;
+      color: #fff;
+      border-color: #b8920f;
+    }
+
+    button.amber:hover {
+      background: #b8920f;
+    }
   </style>
 </head>
+
 <body>
   <div class="header">
-    <h3>⏸ Tab Suspender</h3>
+    <h3>🟡 TabAmber</h3>
   </div>
   <div class="status" id="status">Loading...</div>
 
@@ -63,9 +182,16 @@
 
   <hr class="divider">
 
+  <!-- Phase 2: Auto Group -->
+  <button class="amber" id="auto-group">🔶 Auto Group Tabs</button>
+  <div id="group-status" class="groups-section"></div>
+
+  <hr class="divider">
+
   <button class="primary" id="suspend-all">Suspend All Inactive Now</button>
   <button id="options">All Settings →</button>
 
   <script src="popup.js"></script>
 </body>
+
 </html>
