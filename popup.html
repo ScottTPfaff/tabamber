@@ -306,6 +306,19 @@
       Suggestions</button>
     <button id="ai-digest" style="font-size:12px;">📋 Session Digest</button>
     <button id="ai-anomaly" style="font-size:12px;">🔍 Anomaly Scan</button>
+
+    <!-- Session-only API key prompt (shown on demand by popup.js) -->
+    <div id="ai-key-prompt"
+      style="display:none;margin-top:8px;padding:8px;background:#fff8e1;border:1px solid #ffe082;border-radius:4px;font-size:11px;">
+      <div style="margin-bottom:4px;">Enter your AI API key (session-only, not saved):</div>
+      <input type="password" id="ai-key-input" autocomplete="off"
+        style="width:100%;padding:4px 6px;border:1px solid #ccc;border-radius:3px;font-family:monospace;font-size:11px;">
+      <div style="display:flex;gap:4px;margin-top:4px;">
+        <button id="ai-key-submit" style="flex:1;margin:0;padding:4px;font-size:11px;">OK</button>
+        <button id="ai-key-cancel" style="flex:1;margin:0;padding:4px;font-size:11px;">Cancel</button>
+      </div>
+    </div>
+
     <div id="ai-result"
       style="max-height:200px;overflow-y:auto;font-size:11px;margin-top:6px;padding:6px;background:#fafafa;border-radius:4px;display:none;">
     </div>

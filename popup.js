@@ -3,6 +3,21 @@ const DEFAULTS = {
 };
 const $ = id => document.getElementById(id);
 
+// Escape anything coming from the SW/AI/storage before injecting into the DOM.
+// AI responses are user-controlled (user picks endpoint + model), but they are
+// still arbitrary network content and must never be written as raw HTML.
+const esc = (s) => {
+  if (s === null || s === undefined) return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+};
+// Convert newlines → <br> on *already escaped* text.
+const nl2br = (s) => esc(s).replace(/\n/g, '<br>');
+
 // ─── Diagnostics link ─────────────────────────────────────────────────────
 $('diag-link').addEventListener('click', () => {
   chrome.tabs.create({ url: 'diagnostics.html' });
@@ -18,8 +33,9 @@ const showErrors = () => {
       chrome.runtime.sendMessage({ method: 'get-health' }, hResp => {
         const h = hResp?.health;
         if (h && (h.discardErrors > 0 || h.injectErrors > 0 || h.aiErrors > 0)) {
+          const total = h.discardErrors + h.injectErrors + h.aiErrors;
           $('error-banner-container').innerHTML =
-            `<div class="error-banner">⚠ ${h.discardErrors + h.injectErrors + h.aiErrors} recent errors. ` +
+            `<div class="error-banner">⚠ ${esc(total)} recent errors. ` +
             `<a href="#" id="view-errors">View details</a>` +
             `</div>`;
           document.getElementById('view-errors')?.addEventListener('click', (e) => {
@@ -32,7 +48,7 @@ const showErrors = () => {
       return;
     }
     $('error-banner-container').innerHTML = errors.map(e =>
-      `<div class="error-banner">🔴 ${e.message} <span class="dismiss" data-ts="${e.ts}">✕</span></div>`
+      `<div class="error-banner">🔴 ${esc(e.message)} <span class="dismiss" data-ts="${esc(e.ts)}">✕</span></div>`
     ).join('');
     document.querySelectorAll('.dismiss').forEach(el => {
       el.addEventListener('click', () => {
@@ -94,9 +110,11 @@ const renderGroups = (groups) => {
     container.innerHTML = '';
     return;
   }
-  let html = '<details><summary>Groups (' + groups.length + ')</summary>';
+  let html = '<details><summary>Groups (' + esc(groups.length) + ')</summary>';
   for (const g of groups) {
-    html += `<div class="group-chip">${g.title || g.group} <span class="count">(${g.tabCount || 0})</span></div>`;
+    const name = g.title || g.group || '(unnamed)';
+    const count = g.tabCount ?? (g.tabIds ? g.tabIds.length : 0);
+    html += `<div class="group-chip">${esc(name)} <span class="count">(${esc(count)})</span></div>`;
   }
   html += '</details>';
   container.innerHTML = html;
@@ -106,7 +124,7 @@ chrome.runtime.sendMessage({ method: 'get-groups' }, response => {
   if (response?.groups) {
     renderGroups(response.groups.map(g => ({
       title: g.title,
-      tabCount: (g.tabIds || []).length
+      tabCount: g.tabCount ?? (g.tabIds ? g.tabIds.length : 0),
     })));
   }
 });
@@ -120,30 +138,63 @@ chrome.storage.local.get({ ai_endpoint: '' }, prefs => {
   }
 });
 
-// Helper: get API key (session-only — prompt if not cached)
+// Helper: get API key (session-only — use the inline key input in the popup
+// instead of window.prompt, which behaves poorly inside browser-action popups
+// and can dismiss the popup on some platforms).
 const getApiKey = () => new Promise(resolve => {
   chrome.storage.session.get({ ai_api_key: '' }, stored => {
     if (stored.ai_api_key) {
       resolve(stored.ai_api_key);
-    } else {
-      const key = prompt('Enter your AI API key (session-only, not saved):');
+      return;
+    }
+    const prompt = $('ai-key-prompt');
+    const input = $('ai-key-input');
+    const submit = $('ai-key-submit');
+    const cancel = $('ai-key-cancel');
+    if (!prompt || !input || !submit || !cancel) {
+      // Fallback only if markup is somehow missing — should not happen.
+      resolve(null);
+      return;
+    }
+    prompt.style.display = 'block';
+    input.value = '';
+    input.focus();
+
+    const cleanup = () => {
+      prompt.style.display = 'none';
+      submit.removeEventListener('click', onSubmit);
+      cancel.removeEventListener('click', onCancel);
+      input.removeEventListener('keydown', onKey);
+    };
+    const onSubmit = () => {
+      const key = input.value.trim();
+      cleanup();
       if (key) {
         chrome.storage.session.set({ ai_api_key: key });
         resolve(key);
       } else {
         resolve(null);
       }
-    }
+    };
+    const onCancel = () => { cleanup(); resolve(null); };
+    const onKey = (e) => {
+      if (e.key === 'Enter') onSubmit();
+      else if (e.key === 'Escape') onCancel();
+    };
+    submit.addEventListener('click', onSubmit);
+    cancel.addEventListener('click', onCancel);
+    input.addEventListener('keydown', onKey);
   });
 });
 
-// Show AI result panel
-const showAIResult = (content, isError) => {
+// Show AI result panel. `html` is assumed to be already escaped/built safely
+// by the caller — callers use esc()/nl2br() for anything coming from the AI.
+const showAIResult = (html, isError) => {
   const panel = $('ai-result');
   panel.style.display = 'block';
-  panel.style.color = isError ? '#c62828' : '#222';
+  panel.style.color = isError ? '#c62828' : '';
   panel.style.whiteSpace = 'pre-wrap';
-  panel.innerHTML = content;
+  panel.innerHTML = html;
 };
 
 // Pruning suggestions
@@ -164,12 +215,12 @@ $('ai-pruning').addEventListener('click', async () => {
     $('ai-pruning').disabled = false;
 
     if (response?.error) {
-      showAIResult(`⚠ ${response.error}`, true);
+      showAIResult(`⚠ ${esc(response.error)}`, true);
     } else if (response?.suggestions?.length) {
       let html = '<strong>Pruning Suggestions:</strong><br>';
       for (const s of response.suggestions) {
         const icon = s.action === 'prune' ? '🗑' : s.action === 'archive' ? '📦' : '✅';
-        html += `${icon} <strong>${s.action}</strong> — ${s.reason}<br>`;
+        html += `${icon} <strong>${esc(s.action)}</strong> — ${esc(s.reason)}<br>`;
       }
       showAIResult(html);
     } else {
@@ -196,9 +247,9 @@ $('ai-digest').addEventListener('click', async () => {
     $('ai-digest').disabled = false;
 
     if (response?.error) {
-      showAIResult(`⚠ ${response.error}`, true);
+      showAIResult(`⚠ ${esc(response.error)}`, true);
     } else if (response?.digest) {
-      showAIResult(response.digest.replace(/\n/g, '<br>'));
+      showAIResult(nl2br(response.digest));
     } else {
       showAIResult('No digest available.');
     }
@@ -223,12 +274,12 @@ $('ai-anomaly').addEventListener('click', async () => {
     $('ai-anomaly').disabled = false;
 
     if (response?.error) {
-      showAIResult(`⚠ ${response.error}`, true);
+      showAIResult(`⚠ ${esc(response.error)}`, true);
     } else if (response?.alerts?.length) {
       let html = '<strong>Anomaly Alerts:</strong><br>';
       for (const a of response.alerts) {
         const icon = a.severity === 'high' ? '🔴' : a.severity === 'medium' ? '🟡' : '🟢';
-        html += `${icon} <strong>${a.type}</strong> — ${a.message}<br>`;
+        html += `${icon} <strong>${esc(a.type)}</strong> — ${esc(a.message)}<br>`;
       }
       showAIResult(html);
     } else {

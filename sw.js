@@ -1,22 +1,30 @@
 // TabAmber — Service Worker
 // Firefox: browser.tabs.discard exists; Chrome: chrome.tabs.discard
-const IS_FIREFOX = typeof browser !== 'undefined';
-
-// ─── Imports (all dynamic for ESM in service worker) ───────────────────────
-const log = (await import('./lib/logger.js')).default;
-const notifier = (await import('./lib/notifier.js')).default;
-const health = (await import('./lib/health.js')).default;
-const { clusterTabs } = await import('./lib/cluster.js');
-const {
-  getAIConfig, saveAIConfig, fetchModels,
+import log from './lib/logger.js';
+import notifier from './lib/notifier.js';
+import health from './lib/health.js';
+import { clusterTabs } from './lib/cluster.js';
+import {
+  getAIConfig, fetchModels,
   getPruningSuggestions, getHabitAnalysis, refineGroupNames,
   getSessionDigest, getAnomalyAlerts
-} = await import('./lib/ai-connector.js');
+} from './lib/ai-connector.js';
 
-// ─── Initialize ────────────────────────────────────────────────────────────
-await Promise.all([log.init(), notifier.init(), health.init()]);
+const HAS_TAB_GROUPS = typeof chrome !== 'undefined' && !!chrome.tabGroups;
 
-log.info('TabAmber service worker started', { firefox: IS_FIREFOX });
+const IS_FIREFOX = typeof browser !== 'undefined';
+
+// Initialize on first use
+let initialized = false;
+const ensureInit = async () => {
+  if (!initialized) {
+    await Promise.all([log.init(), notifier.init(), health.init()]);
+    log.info('TabAmber service worker started', { firefox: IS_FIREFOX });
+    initialized = true;
+  }
+};
+
+ensureInit();
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -81,7 +89,15 @@ const safeInject = async (tabId, file) => {
 
 // ─── Phase 1: Time-based suspension ───────────────────────────────────────
 
+// Prevent overlapping check() runs (alarm + shortcut + startup can race).
+let checkInFlight = null;
+
 const check = async (forceAll = false) => {
+  if (checkInFlight) {
+    log.debug('check() already in flight, skipping re-entry');
+    return checkInFlight;
+  }
+  checkInFlight = (async () => {
   try {
     // Check if suspension is paused
     const sessionState = await chrome.storage.session.get({ suspension_paused: false });
@@ -104,56 +120,61 @@ const check = async (forceAll = false) => {
     }
 
     const cutoff = Date.now() - prefs.period * 60 * 1000;
+    // `active: false` is declared in the query — no need to re-check in the loop.
     const tabs = await chrome.tabs.query({ discarded: false, active: false, url: '*://*/*' });
 
-    let suspended = 0;
+    // Pre-filter cheap synchronous checks (pinned, audible, collapsed groups, whitelist)
+    // so we only inject into tabs that are actually suspension candidates.
+    const candidates = [];
     let skipped = 0;
-
     for (const tab of tabs) {
-      if (tab.active) continue;
       if (prefs.pinned && tab.pinned) { skipped++; continue; }
       if (prefs.audio && tab.audible) { skipped++; continue; }
 
-      // skip tabs in collapsed groups — they're already "group-suspended"
-      if (tab.groupId !== -1) {
+      if (HAS_TAB_GROUPS && tab.groupId !== undefined && tab.groupId !== -1) {
         try {
           const group = await chrome.tabGroups.get(tab.groupId);
           if (group.collapsed) { skipped++; continue; }
-        } catch { }
+        } catch { /* group not available: fall through */ }
       }
 
-      // whitelist check
       let hostname;
       try {
         ({ hostname } = new URL(tab.url));
-        if (prefs.whitelist.some(h => hostname === h || hostname.endsWith('.' + h))) {
-          skipped++;
-          continue;
-        }
       } catch {
         skipped++;
-        continue; // unparseable URL, skip
+        continue;
       }
+      if (prefs.whitelist.some(h => hostname === h || hostname.endsWith('.' + h))) {
+        skipped++;
+        continue;
+      }
+      candidates.push(tab);
+    }
 
-      // get in-page metadata
+    // Inject meta.js in parallel — large tab counts were previously O(N) serial.
+    const metas = await Promise.all(candidates.map(async tab => {
       const injectResult = await safeInject(tab.id, 'inject/meta.js');
-      if (!injectResult.ok) { skipped++; continue; }
-
-      let meta = {};
+      if (!injectResult.ok) return { tab, meta: null };
       try {
         const results = injectResult.results;
         const merged = Object.assign({}, ...results.map(r => r.result || {}));
         merged.forms = results.some(r => r.result && r.result.forms);
         merged.audible = results.some(r => r.result && r.result.audible);
         merged.paused = results.some(r => r.result && r.result.paused);
-        meta = merged;
+        return { tab, meta: merged };
       } catch (err) {
         log.debug(`Failed to merge meta for tab ${tab.id}: ${err.message}`);
-        skipped++;
-        continue;
+        return { tab, meta: null };
       }
+    }));
 
+    let suspended = 0;
+
+    for (const { tab, meta } of metas) {
+      if (!meta) { skipped++; continue; }
       if (prefs.forms && meta.forms) { skipped++; continue; }
+      // Note: tab.audible was already checked above; meta.audible is subframe/PiP signal.
       if (prefs.audio && meta.audible) { skipped++; continue; }
       if (prefs.paused && meta.paused) { skipped++; continue; }
       if (!meta.ready && !forceAll) { skipped++; continue; }
@@ -185,30 +206,33 @@ const check = async (forceAll = false) => {
     notifier.error(`Suspend check failed: ${err.message}`, { error: err.message, stack: err.stack });
     log.error(`Suspend check failed`, { error: err.message, stack: err.stack });
   }
+  })().finally(() => { checkInFlight = null; });
+  return checkInFlight;
 };
 
 // ─── Phase 2: Local tab clustering & group management ─────────────────────
 
-// Scrape categorization signals from all non-discarded tabs
+// Scrape categorization signals from all non-discarded tabs (parallel).
 const scrapeAllSignals = async () => {
   const tabs = await chrome.tabs.query({ discarded: false, url: '*://*/*' });
-  const signals = [];
+  const candidates = tabs.filter(t => !t.active && !t.pinned);
 
-  for (const tab of tabs) {
-    if (tab.active) continue;
-    if (tab.pinned) continue;
-
+  const results = await Promise.all(candidates.map(async tab => {
     const result = await safeInject(tab.id, 'inject/classify.js');
     if (result.ok && result.results?.[0]?.result?.ready) {
-      signals.push({ tabId: tab.id, signal: result.results[0].result });
+      return { tabId: tab.id, signal: result.results[0].result };
     }
-  }
+    return null;
+  }));
 
-  return signals;
+  return results.filter(Boolean);
 };
 
 // Run clustering, create Chrome tab groups
 const autoGroup = async () => {
+  if (!HAS_TAB_GROUPS) {
+    return { ok: false, message: 'Tab groups are not supported in this browser version' };
+  }
   try {
     const signals = await scrapeAllSignals();
     if (signals.length < 3) {
@@ -228,7 +252,7 @@ const autoGroup = async () => {
           title: g.group,
           collapsed: false
         });
-        created.push({ group: g.group, tabIds: g.tabIds, groupId });
+        created.push({ group: g.group, title: g.group, tabIds: g.tabIds, tabCount: g.tabIds.length, groupId });
         health.inc('groupsCreated');
       } catch (err) {
         health.recordError(`Failed to create group "${g.group}": ${err.message}`, 'GROUP_ERROR');
@@ -246,8 +270,33 @@ const autoGroup = async () => {
   }
 };
 
+// Query groups along with their current tab counts (chrome.tabGroups.query
+// doesn't return tabIds itself).
+const listGroupsWithCounts = async () => {
+  if (!HAS_TAB_GROUPS) return [];
+  try {
+    const groups = await chrome.tabGroups.query({});
+    return Promise.all(groups.map(async g => {
+      const tabs = await chrome.tabs.query({ groupId: g.id });
+      return {
+        id: g.id,
+        title: g.title,
+        color: g.color,
+        collapsed: g.collapsed,
+        windowId: g.windowId,
+        tabIds: tabs.map(t => t.id),
+        tabCount: tabs.length,
+      };
+    }));
+  } catch (err) {
+    log.debug(`listGroupsWithCounts failed: ${err.message}`);
+    return [];
+  }
+};
+
 // Suspend all tabs within a specific group
 const suspendGroupById = async (groupId) => {
+  if (!HAS_TAB_GROUPS) return { ok: false, error: 'tabGroups unavailable' };
   try {
     const tabs = await chrome.tabs.query({ groupId, discarded: false });
     let count = 0;
@@ -269,6 +318,7 @@ const suspendGroupById = async (groupId) => {
 
 // Wake all tabs in a group
 const wakeGroupById = async (groupId) => {
+  if (!HAS_TAB_GROUPS) return { ok: false, error: 'tabGroups unavailable' };
   try {
     await chrome.tabGroups.update(groupId, { collapsed: false });
     const tabs = await chrome.tabs.query({ groupId, discarded: true });
@@ -287,247 +337,206 @@ const wakeGroupById = async (groupId) => {
 
 const buildAISignals = async () => {
   const tabs = await chrome.tabs.query({ discarded: false, url: '*://*/*' });
-  const signals = [];
+  const candidates = tabs.filter(t => !t.active && !t.pinned);
 
-  for (const tab of tabs) {
-    if (tab.active || tab.pinned) continue;
-
+  const signals = await Promise.all(candidates.map(async tab => {
     const result = await safeInject(tab.id, 'inject/classify.js');
-    if (!result.ok || !result.results?.[0]?.result?.ready) continue;
-
+    if (!result.ok || !result.results?.[0]?.result?.ready) return null;
     const createdDaysAgo = tab.lastAccessed ? Math.floor((Date.now() - tab.lastAccessed) / 86400000) : 0;
-    signals.push({
+    return {
       tabId: tab.id,
       signal: result.results[0].result,
       age: createdDaysAgo,
       visits: 0,
       lastSeen: createdDaysAgo,
       memory: tab.memory?.usedJSHeapSize || 0,
-    });
-  }
+    };
+  }));
 
-  return signals;
+  return signals.filter(Boolean);
 };
 
 // ─── Message handler ──────────────────────────────────────────────────────
 
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  switch (request.method) {
-    // Phase 1
-    case 'suspend-all':
-      check(true);
-      break;
-
-    // Phase 2
-    case 'auto-group':
-      autoGroup().then(sendResponse);
-      return true;
-
-    case 'suspend-group':
-      suspendGroupById(request.groupId).then(sendResponse);
-      return true;
-
-    case 'wake-group':
-      wakeGroupById(request.groupId).then(sendResponse);
-      return true;
-
-    case 'get-groups':
-      chrome.tabGroups.query({}).then(groups => sendResponse({ groups })).catch(() => sendResponse({ groups: [] }));
-      return true;
-
-    // Phase 3: AI
-    case 'ai-fetch-models':
-      fetchModels(request.endpoint, request.apiKey)
-        .then(models => sendResponse({ models }))
-        .catch(err => sendResponse({ models: [], error: err.message }));
-      return true;
-
-    case 'ai-pruning':
-      (async () => {
-        health.inc('aiCalls');
-        const config = await getAIConfig();
-        config.apiKey = request.apiKey;
-        if (!config.endpoint || !config.model) {
-          health.inc('aiErrors');
-          sendResponse({ error: 'AI not configured — set endpoint and model in settings' });
-          return;
-        }
-        try {
-          const signals = await buildAISignals();
-          const result = await getPruningSuggestions(config, signals);
-          sendResponse(result);
-        } catch (err) {
-          health.inc('aiErrors');
-          notifier.error(`AI pruning failed: ${err.message}`);
-          sendResponse({ error: err.message });
-        }
-      })();
-      return true;
-
-    case 'ai-habits':
-      (async () => {
-        health.inc('aiCalls');
-        const config = await getAIConfig();
-        config.apiKey = request.apiKey;
-        if (!config.endpoint || !config.model) {
-          health.inc('aiErrors');
-          sendResponse({ error: 'AI not configured' });
-          return;
-        }
-        try {
-          const history = request.tabHistory || [];
-          const result = await getHabitAnalysis(config, history);
-          sendResponse(result);
-        } catch (err) {
-          health.inc('aiErrors');
-          notifier.error(`AI habit analysis failed: ${err.message}`);
-          sendResponse({ error: err.message });
-        }
-      })();
-      return true;
-
-    case 'ai-refine-names':
-      (async () => {
-        health.inc('aiCalls');
-        const config = await getAIConfig();
-        config.apiKey = request.apiKey;
-        if (!config.endpoint || !config.model) {
-          health.inc('aiErrors');
-          sendResponse({ error: 'AI not configured' });
-          return;
-        }
-        try {
-          const result = await refineGroupNames(config, request.groups || []);
-          sendResponse({ groups: result });
-        } catch (err) {
-          health.inc('aiErrors');
-          notifier.error(`AI name refinement failed: ${err.message}`);
-          sendResponse({ error: err.message });
-        }
-      })();
-      return true;
-
-    case 'ai-digest':
-      (async () => {
-        health.inc('aiCalls');
-        const config = await getAIConfig();
-        config.apiKey = request.apiKey;
-        if (!config.endpoint || !config.model) {
-          health.inc('aiErrors');
-          sendResponse({ error: 'AI not configured' });
-          return;
-        }
-        try {
-          const signals = await buildAISignals();
-          const result = await getSessionDigest(config, signals, request.stats || {});
-          sendResponse({ digest: result });
-        } catch (err) {
-          health.inc('aiErrors');
-          notifier.error(`AI session digest failed: ${err.message}`);
-          sendResponse({ error: err.message });
-        }
-      })();
-      return true;
-
-    case 'ai-anomaly':
-      (async () => {
-        health.inc('aiCalls');
-        const config = await getAIConfig();
-        config.apiKey = request.apiKey;
-        if (!config.endpoint || !config.model) {
-          health.inc('aiErrors');
-          sendResponse({ error: 'AI not configured' });
-          return;
-        }
-        try {
-          const signals = await buildAISignals();
-          const result = await getAnomalyAlerts(config, signals);
-          sendResponse(result);
-        } catch (err) {
-          health.inc('aiErrors');
-          notifier.error(`AI anomaly scan failed: ${err.message}`);
-          sendResponse({ error: err.message });
-        }
-      })();
-      return true;
-
-    // Diagnostics
-    case 'get-logs':
-      sendResponse({ entries: log.getEntries() });
-      return true;
-
-    case 'clear-logs':
-      log.clear();
-      sendResponse({ ok: true });
-      return true;
-
-    case 'get-health':
-      sendResponse({ health: health.snapshot() });
-      return true;
-
-    case 'get-critical':
-      sendResponse({ critical: notifier.getCriticalErrors() });
-      return true;
-
-    case 'clear-badge':
-      notifier.clearBadge().then(() => sendResponse({ ok: true }));
-      return true;
-
-    // Runtime config update (from options page)
-    case 'update-config':
-      if (request.log_level || request.log_webhook !== undefined) {
-        log.setConfig({
-          level: request.log_level,
-          webhook: request.log_webhook,
-        });
-      }
-      if (request.notif_badge !== undefined || request.notif_chrome !== undefined) {
-        notifier.setConfig({
-          notif_badge: request.notif_badge,
-          notif_chrome: request.notif_chrome,
-        });
-      }
-      sendResponse({ ok: true });
-      return true;
+// All async handlers: return true from the listener itself so Chrome keeps
+// the message port open until sendResponse fires.
+const runAIHandler = async (request, sendResponse, buildMessages, resultKey) => {
+  health.inc('aiCalls');
+  try {
+    const config = await getAIConfig();
+    config.apiKey = request.apiKey;
+    if (!config.endpoint || !config.model) {
+      health.inc('aiErrors');
+      sendResponse({ error: 'AI not configured — set endpoint and model in settings' });
+      return;
+    }
+    const result = await buildMessages(config);
+    sendResponse(resultKey ? { [resultKey]: result } : result);
+  } catch (err) {
+    health.inc('aiErrors');
+    notifier.error(`AI call failed: ${err.message}`);
+    sendResponse({ error: err.message });
   }
+};
+
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  // Fire-and-forget messages that don't need a response.
+  if (request.method === 'suspend-all') {
+    ensureInit().then(() => check(true));
+    return false;
+  }
+
+  // Everything else is async — keep the port open.
+  ensureInit().then(async () => {
+    switch (request.method) {
+      case 'auto-group':
+        sendResponse(await autoGroup());
+        return;
+
+      case 'suspend-group':
+        sendResponse(await suspendGroupById(request.groupId));
+        return;
+
+      case 'wake-group':
+        sendResponse(await wakeGroupById(request.groupId));
+        return;
+
+      case 'get-groups': {
+        const groups = await listGroupsWithCounts();
+        sendResponse({ groups });
+        return;
+      }
+
+      case 'ai-fetch-models':
+        try {
+          const models = await fetchModels(request.endpoint, request.apiKey);
+          sendResponse({ models });
+        } catch (err) {
+          sendResponse({ models: [], error: err.message });
+        }
+        return;
+
+      case 'ai-pruning':
+        await runAIHandler(request, sendResponse, async (config) => {
+          const signals = await buildAISignals();
+          return await getPruningSuggestions(config, signals);
+        });
+        return;
+
+      case 'ai-habits':
+        await runAIHandler(request, sendResponse, async (config) => {
+          return await getHabitAnalysis(config, request.tabHistory || []);
+        });
+        return;
+
+      case 'ai-refine-names':
+        await runAIHandler(request, sendResponse, async (config) => {
+          return await refineGroupNames(config, request.groups || []);
+        }, 'groups');
+        return;
+
+      case 'ai-digest':
+        await runAIHandler(request, sendResponse, async (config) => {
+          const signals = await buildAISignals();
+          return await getSessionDigest(config, signals, request.stats || {});
+        }, 'digest');
+        return;
+
+      case 'ai-anomaly':
+        await runAIHandler(request, sendResponse, async (config) => {
+          const signals = await buildAISignals();
+          return await getAnomalyAlerts(config, signals);
+        });
+        return;
+
+      case 'get-logs':
+        sendResponse({ entries: log.getEntries() });
+        return;
+
+      case 'clear-logs':
+        await log.clear();
+        sendResponse({ ok: true });
+        return;
+
+      case 'get-health':
+        sendResponse({ health: health.snapshot() });
+        return;
+
+      case 'get-critical':
+        sendResponse({ critical: notifier.getCriticalErrors() });
+        return;
+
+      case 'clear-badge':
+        await notifier.clearBadge();
+        sendResponse({ ok: true });
+        return;
+
+      case 'update-config':
+        if (request.log_level || request.log_webhook !== undefined) {
+          log.setConfig({
+            level: request.log_level,
+            webhook: request.log_webhook,
+          });
+        }
+        if (request.notif_badge !== undefined || request.notif_chrome !== undefined) {
+          notifier.setConfig({
+            notif_badge: request.notif_badge,
+            notif_chrome: request.notif_chrome,
+          });
+        }
+        sendResponse({ ok: true });
+        return;
+
+      default:
+        sendResponse({ error: `Unknown method: ${request.method}` });
+    }
+  }).catch(err => {
+    log.error('Message handler failed', { method: request.method, error: err.message });
+    try { sendResponse({ error: err.message }); } catch { /* port may be closed */ }
+  });
+
+  return true; // keep port open for async sendResponse
 });
 
 // ─── Alarms & lifecycle ───────────────────────────────────────────────────
 
 chrome.alarms.create('suspend.check', { periodInMinutes: 1 });
 chrome.alarms.onAlarm.addListener(alarm => {
-  if (alarm.name === 'suspend.check') check();
+  if (alarm.name === 'suspend.check') ensureInit().then(() => check());
 });
 
 // ─── Context menu ──────────────────────────────────────────────────────────
 
-chrome.runtime.onInstalled.addListener(() => {
-  chrome.contextMenus.create({
-    id: 'tabamber-never-suspend',
-    title: 'TabAmber: Never suspend this tab',
-    contexts: ['page'],
+const installContextMenus = () => {
+  // Remove any pre-existing items (avoids duplicate-id errors after reload).
+  chrome.contextMenus.removeAll(() => {
+    chrome.contextMenus.create({
+      id: 'tabamber-never-suspend',
+      title: 'TabAmber: Never suspend this tab',
+      contexts: ['page'],
+    });
+    chrome.contextMenus.create({
+      id: 'tabamber-suspend-now',
+      title: 'TabAmber: Suspend this tab now',
+      contexts: ['page'],
+    });
+    chrome.contextMenus.create({
+      id: 'tabamber-whitelist-add',
+      title: 'TabAmber: Add site to whitelist',
+      contexts: ['page'],
+    });
+    chrome.contextMenus.create({
+      id: 'tabamber-separator',
+      type: 'separator',
+      contexts: ['page'],
+    });
+    chrome.contextMenus.create({
+      id: 'tabamber-open-diagnostics',
+      title: 'TabAmber: Open Diagnostics',
+      contexts: ['action'],
+    });
   });
-  chrome.contextMenus.create({
-    id: 'tabamber-suspend-now',
-    title: 'TabAmber: Suspend this tab now',
-    contexts: ['page'],
-  });
-  chrome.contextMenus.create({
-    id: 'tabamber-whitelist-add',
-    title: 'TabAmber: Add site to whitelist',
-    contexts: ['page'],
-  });
-  chrome.contextMenus.create({
-    id: 'tabamber-separator',
-    type: 'separator',
-    contexts: ['page'],
-  });
-  chrome.contextMenus.create({
-    id: 'tabamber-open-diagnostics',
-    title: 'TabAmber: Open Diagnostics',
-    contexts: ['action'],
-  });
-});
+};
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   switch (info.menuItemId) {
@@ -595,18 +604,27 @@ chrome.commands.onCommand.addListener(async (command) => {
 });
 
 chrome.runtime.onStartup.addListener(async () => {
+  await ensureInit();
   log.info('Browser startup');
   const prefs = await getPrefs();
   if (prefs.suspend_on_startup) check(true);
   else check();
 });
 
-chrome.runtime.onInstalled.addListener(check);
+// Single onInstalled listener: install context menus + kick off a first check.
+chrome.runtime.onInstalled.addListener(async () => {
+  await ensureInit();
+  installContextMenus();
+  check();
+});
 
-// Track tab wake (user clicks a discarded tab)
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+// Track tab wake (user clicks a discarded tab). We deliberately do NOT log
+// the tab title — users may have configured a log_webhook that streams
+// entries to an external URL, and the README promises titles never leave
+// the extension.
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.discarded === false) {
     health.inc('tabsWoken');
-    log.info(`Tab ${tabId} woken`, { title: tab.title?.slice(0, 50) });
+    log.info(`Tab ${tabId} woken`);
   }
 });

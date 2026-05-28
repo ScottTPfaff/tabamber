@@ -33,15 +33,16 @@ chrome.storage.local.get(DEFAULTS, prefs => {
   // Phase 2
   $('auto_group').checked = prefs.auto_group;
   $('cluster_threshold').value = Math.round(prefs.cluster_threshold * 100);
-  // Phase 3: AI
-  if (prefs.ai_endpoint) {
-    $('ai_endpoint').value = prefs.ai_endpoint;
-    updateConnectionStatus('connected');
-  }
+  // Phase 3: AI — reflect stored values but do NOT claim we're connected
+  // or hit the endpoint on page load. Users explicitly click "Fetch Models"
+  // to verify.
+  if (prefs.ai_endpoint) $('ai_endpoint').value = prefs.ai_endpoint;
   if (prefs.ai_model) {
-    $('ai_model').value = prefs.ai_model;
-    populateModelDropdown(prefs.ai_model);
+    // Seed the dropdown with the previously-selected model so the label is
+    // visible even before Fetch Models is clicked.
+    $('ai_model').innerHTML = `<option value="${escAttr(prefs.ai_model)}" selected>${escText(prefs.ai_model)}</option>`;
   }
+  updateConnectionStatus('disconnected');
   if (prefs.ai_features) {
     $('ai_pruning').checked = prefs.ai_features.pruning ?? true;
     $('ai_habit').checked = prefs.ai_features.habit_analysis ?? false;
@@ -53,6 +54,12 @@ chrome.storage.local.get(DEFAULTS, prefs => {
   const dataLevelRadio = document.querySelector(`input[name="ai_data_level"][value="${prefs.ai_data_level}"]`);
   if (dataLevelRadio) dataLevelRadio.checked = true;
 });
+
+// Minimal HTML escapers for the few places options.js builds markup.
+const escText = (s) => String(s ?? '')
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const escAttr = (s) => String(s ?? '')
+  .replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 // ─── AI: Fetch models ─────────────────────────────────────────────────────
 
@@ -73,9 +80,10 @@ const populateModelDropdown = (selectedModel) => {
     $('ai_fetch_models').textContent = 'Fetch Models';
 
     if (response?.models?.length) {
-      $('ai_model').innerHTML = response.models.map(m =>
-        `<option value="${m}" ${m === selectedModel ? 'selected' : ''}>${m}</option>`
-      ).join('');
+      $('ai_model').innerHTML = response.models.map(m => {
+        const selected = m === selectedModel ? ' selected' : '';
+        return `<option value="${escAttr(m)}"${selected}>${escText(m)}</option>`;
+      }).join('');
       updateConnectionStatus('connected');
     } else {
       $('ai_model').innerHTML = '<option value="">No models found</option>';
@@ -250,20 +258,70 @@ $('import-settings').addEventListener('click', () => {
   $('import-file').click();
 });
 
+// Whitelist of keys that can be restored from an imported settings JSON.
+// Anything else (log entries, crashed state, API keys, the webhook URL, etc.)
+// is ignored — a malicious file should not be able to silently reroute
+// log streams or AI calls.
+const IMPORT_ALLOWED_KEYS = new Set([
+  // Phase 1
+  'period', 'whitelist', 'pinned', 'audio', 'paused', 'forms',
+  'idle_only', 'idle_timeout', 'memory_enabled', 'memory_mb',
+  'suspend_on_startup',
+  // Phase 2
+  'auto_group', 'cluster_threshold',
+  // Phase 3 (AI): endpoint + model + features + data level are user config.
+  // Intentionally omitted: 'log_webhook' (exfiltration risk),
+  // 'ai_endpoint' (exfiltration risk — user must re-enter on import),
+  // and anything not listed here.
+  'ai_model', 'ai_features', 'ai_data_level',
+  // Notifications / logging behavior (not the webhook URL)
+  'notif_badge', 'notif_chrome', 'notif_sounds',
+  'log_level', 'log_max_entries',
+]);
+
+// Loose type-check: reject values that don't match what the setting expects.
+const validateImport = (obj) => {
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
+  const clean = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (!IMPORT_ALLOWED_KEYS.has(k)) continue;
+    // Very light type-checking — refuse exotic payloads.
+    if (k === 'whitelist') {
+      if (Array.isArray(v) && v.every(h => typeof h === 'string')) clean[k] = v;
+    } else if (k === 'ai_features') {
+      if (v && typeof v === 'object' && !Array.isArray(v)) clean[k] = v;
+    } else if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
+      clean[k] = v;
+    }
+  }
+  return clean;
+};
+
 $('import-file').addEventListener('change', (e) => {
   const file = e.target.files[0];
   if (!file) return;
   const reader = new FileReader();
   reader.onload = (ev) => {
+    let parsed;
     try {
-      const prefs = JSON.parse(ev.target.result);
-      chrome.storage.local.set(prefs, () => {
-        alert(`Imported ${Object.keys(prefs).length} settings. Reload the extension to apply changes.`);
-        location.reload();
-      });
+      parsed = JSON.parse(ev.target.result);
     } catch {
-      alert('Invalid settings file.');
+      alert('Invalid settings file: not valid JSON.');
+      return;
     }
+    const clean = validateImport(parsed);
+    if (!clean || Object.keys(clean).length === 0) {
+      alert('Invalid settings file: no recognized settings found.');
+      return;
+    }
+    const dropped = Object.keys(parsed).filter(k => !(k in clean));
+    chrome.storage.local.set(clean, () => {
+      const msg = dropped.length
+        ? `Imported ${Object.keys(clean).length} settings. Ignored for safety: ${dropped.join(', ')}. Reload to apply.`
+        : `Imported ${Object.keys(clean).length} settings. Reload to apply.`;
+      alert(msg);
+      location.reload();
+    });
   };
   reader.readAsText(file);
 });

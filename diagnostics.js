@@ -18,12 +18,12 @@ const renderHealth = (health) => {
   ];
 
   $('health-grid').innerHTML = cards.map(c =>
-    `<div class="card ${c.cls}"><div class="value">${c.value}</div><div class="label">${c.label}</div></div>`
+    `<div class="card ${escapeHtml(c.cls)}"><div class="value">${escapeHtml(c.value)}</div><div class="label">${escapeHtml(c.label)}</div></div>`
   ).join('');
 
   if (health.lastError) {
     const errPanel = $('critical-panel');
-    errPanel.innerHTML += `<div class="crit-entry">⚠ <strong>${health.lastError.code}</strong> — ${health.lastError.message} <span style="color:#888;font-size:11px;">(${health.lastErrorAt})</span></div>`;
+    errPanel.innerHTML += `<div class="crit-entry">⚠ <strong>${escapeHtml(health.lastError.code)}</strong> — ${escapeHtml(health.lastError.message)} <span style="color:#888;font-size:11px;">(${escapeHtml(health.lastErrorAt)})</span></div>`;
   }
 };
 
@@ -35,7 +35,7 @@ const renderCriticalErrors = (errors) => {
     return;
   }
   $('critical-panel').innerHTML = errors.map(e =>
-    `<div class="crit-entry">🔴 ${e.message} <span style="color:#888;font-size:11px;">${e.ts}</span></div>`
+    `<div class="crit-entry">🔴 ${escapeHtml(e.message)} <span style="color:#888;font-size:11px;">${escapeHtml(e.ts)}</span></div>`
   ).join('');
 };
 
@@ -72,8 +72,13 @@ const renderLogs = () => {
 };
 
 const escapeHtml = (str) => {
-  if (!str) return '';
-  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 };
 
 // ─── Event Handlers ───────────────────────────────────────────────────────
