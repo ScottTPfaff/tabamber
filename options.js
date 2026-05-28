@@ -100,6 +100,114 @@ const updateConnectionStatus = (status) => {
   el.textContent = status === 'connected' ? '✓ Connected' : '✗ Not connected';
 };
 
+// ─── Habit Analysis ───────────────────────────────────────────────────────
+
+const esc = s => String(s ?? '')
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;');
+
+$('run-habit-analysis').addEventListener('click', () => {
+  const btn = $('run-habit-analysis');
+  const resultEl = $('habit-result');
+  const applySection = $('habit-apply-section');
+
+  btn.disabled = true;
+  btn.textContent = 'Analyzing…';
+  resultEl.style.display = 'none';
+  applySection.style.display = 'none';
+
+  chrome.runtime.sendMessage({ method: 'ai-habits' }, resp => {
+    btn.disabled = false;
+    btn.textContent = 'Analyze My Habits';
+    resultEl.style.display = 'block';
+
+    if (!resp?.ok) {
+      resultEl.textContent = `Error: ${resp?.error || 'Unknown error'}`;
+      return;
+    }
+
+    resultEl.textContent = resp.text || 'No suggestions returned.';
+
+    // Parse any rule suggestions from the response
+    const suggestions = resp.rules || [];
+    if (suggestions.length === 0) return;
+
+    const ALLOWED_KEYS = new Set(['period', 'idle_only', 'memory_enabled', 'whitelist']);
+
+    const validated = suggestions.filter(s => {
+      if (!s || typeof s !== 'object') return false;
+      if ('period' in s && (typeof s.period !== 'number' || s.period < 1 || s.period > 1440)) return false;
+      if ('idle_only' in s && typeof s.idle_only !== 'boolean') return false;
+      if ('memory_enabled' in s && typeof s.memory_enabled !== 'boolean') return false;
+      if ('whitelist' in s) {
+        if (!Array.isArray(s.whitelist)) return false;
+        if (s.whitelist.length > 100) return false;
+        if (!s.whitelist.every(h => typeof h === 'string')) return false;
+      }
+      return Object.keys(s).every(k => ALLOWED_KEYS.has(k));
+    });
+
+    if (validated.length === 0) return;
+
+    applySection.style.display = 'block';
+    applySection.innerHTML = `
+      <p style="font-size:12px;color:#888;margin-bottom:6px;">Suggested rule changes:</p>
+      ${validated.map((s, i) => `
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;font-size:12px;">
+          <span>${esc(JSON.stringify(s))}</span>
+          <button type="button" data-idx="${i}" class="apply-rule-btn"
+            style="padding:2px 8px;font-size:11px;cursor:pointer;">Apply</button>
+        </div>`).join('')}`;
+
+    applySection.querySelectorAll('.apply-rule-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const rule = validated[parseInt(btn.dataset.idx)];
+        chrome.storage.local.get(null, current => {
+          const merged = { ...current };
+          for (const [k, v] of Object.entries(rule)) {
+            if (k === 'whitelist' && Array.isArray(current.whitelist)) {
+              merged.whitelist = [...new Set([...current.whitelist, ...v])];
+            } else {
+              merged[k] = v;
+            }
+          }
+          chrome.storage.local.set(merged, () => {
+            btn.textContent = '✓ Applied';
+            btn.disabled = true;
+          });
+        });
+      });
+    });
+  });
+});
+
+// ─── Archive Stale Groups ─────────────────────────────────────────────────
+
+$('run-archive').addEventListener('click', () => {
+  const btn = $('run-archive');
+  const resultEl = $('archive-result');
+  const days = Math.max(1, Math.min(365, parseInt($('archive-threshold').value) || 7));
+  const closeAfter = $('archive-close-after').checked;
+
+  btn.disabled = true;
+  btn.textContent = 'Archiving…';
+  resultEl.textContent = '';
+
+  chrome.runtime.sendMessage({ method: 'archive-stale-groups', thresholdDays: days, closeAfter }, resp => {
+    btn.disabled = false;
+    btn.textContent = 'Archive Stale Groups Now';
+    if (resp?.ok) {
+      resultEl.style.color = '#2e7d32';
+      resultEl.textContent = resp.message;
+    } else {
+      resultEl.style.color = '#c62828';
+      resultEl.textContent = `Error: ${resp?.error || 'Unknown error'}`;
+    }
+  });
+});
+
 // ─── Save ─────────────────────────────────────────────────────────────────
 
 $('save').addEventListener('click', () => {

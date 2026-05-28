@@ -14,11 +14,37 @@ const HAS_TAB_GROUPS = typeof chrome !== 'undefined' && !!chrome.tabGroups;
 
 const IS_FIREFOX = typeof browser !== 'undefined';
 
+// ─── Search Index (in-memory, rebuilt from discarded tabs on SW start) ────
+// Maps tabId → { title, url, hostname, suspendedAt }
+const searchIndex = new Map();
+
+const buildSearchIndex = async () => {
+  try {
+    const discarded = await chrome.tabs.query({ discarded: true, url: '*://*/*' });
+    for (const tab of discarded) {
+      if (!tab.url) continue;
+      try {
+        const { hostname } = new URL(tab.url);
+        searchIndex.set(tab.id, {
+          title: tab.title || hostname,
+          url: tab.url,
+          hostname,
+          suspendedAt: tab.lastAccessed || Date.now(),
+        });
+      } catch { /* invalid URL */ }
+    }
+    log.debug(`Search index initialized: ${searchIndex.size} discarded tabs`);
+  } catch (err) {
+    log.warn(`buildSearchIndex failed: ${err.message}`);
+  }
+};
+
 // Initialize on first use
 let initialized = false;
 const ensureInit = async () => {
   if (!initialized) {
     await Promise.all([log.init(), notifier.init(), health.init()]);
+    await buildSearchIndex();
     log.info('TabAmber service worker started', { firefox: IS_FIREFOX });
     initialized = true;
   }
@@ -170,6 +196,7 @@ const check = async (forceAll = false) => {
     }));
 
     let suspended = 0;
+    const historyEntries = [];
 
     for (const { tab, meta } of metas) {
       if (!meta) { skipped++; continue; }
@@ -183,6 +210,11 @@ const check = async (forceAll = false) => {
       if (prefs.memory_enabled && meta.memory && meta.memory > prefs.memory_mb * 1024 * 1024) {
         log.info(`Force-suspending high memory tab ${tab.id} (${Math.round(meta.memory / 1048576)}MB)`);
         health.inc('tabsSuspended');
+        try {
+          const hn = new URL(tab.url).hostname;
+          searchIndex.set(tab.id, { title: tab.title || hn, url: tab.url, hostname: hn, suspendedAt: Date.now() });
+          historyEntries.push({ hostname: hn, dayOfWeek: new Date().getDay(), hourOfDay: new Date().getHours(), ageMinutes: Math.round((Date.now() - (meta.time || 0)) / 60000) });
+        } catch { /* invalid URL */ }
         tabsDiscard(tab.id);
         suspended++;
         await new Promise(r => setTimeout(r, 50)); // prevent Chrome same-process race
@@ -195,9 +227,25 @@ const check = async (forceAll = false) => {
 
       log.info(`Suspending tab ${tab.id} (inactive ${Math.round((Date.now() - lastVisit) / 60000)}min)`);
       health.inc('tabsSuspended');
+      try {
+        const hn = new URL(tab.url).hostname;
+        searchIndex.set(tab.id, { title: tab.title || hn, url: tab.url, hostname: hn, suspendedAt: Date.now() });
+        historyEntries.push({ hostname: hn, dayOfWeek: new Date().getDay(), hourOfDay: new Date().getHours(), ageMinutes: Math.round((Date.now() - (meta.time || 0)) / 60000) });
+      } catch { /* invalid URL */ }
       tabsDiscard(tab.id);
       suspended++;
       await new Promise(r => setTimeout(r, 50)); // prevent Chrome same-process race
+    }
+
+    // Persist tab history (batch write — safe here since check() is serialized)
+    if (historyEntries.length > 0) {
+      try {
+        const stored = await chrome.storage.local.get({ tab_history: [] });
+        const updated = [...stored.tab_history, ...historyEntries].slice(-200);
+        await chrome.storage.local.set({ tab_history: updated });
+      } catch (err) {
+        log.warn(`Failed to persist tab history: ${err.message}`);
+      }
     }
 
     log.info(`Suspend check complete: ${suspended} suspended, ${skipped} skipped`);
@@ -333,6 +381,80 @@ const wakeGroupById = async (groupId) => {
   }
 };
 
+// ─── Stale Group Archiving ─────────────────────────────────────────────────
+
+const archiveStaleGroups = async (thresholdDays = 7, closeAfter = false) => {
+  if (!HAS_TAB_GROUPS) {
+    return { ok: false, error: 'Tab groups not supported in this browser' };
+  }
+  if (!chrome.bookmarks) {
+    return { ok: false, error: 'Bookmarks permission not available — reload the extension' };
+  }
+  try {
+    const cutoff = Date.now() - thresholdDays * 86400000;
+    const groups = await listGroupsWithCounts();
+    const staleGroups = [];
+
+    for (const g of groups) {
+      if (g.tabCount === 0) continue;
+      const tabs = await chrome.tabs.query({ groupId: g.id });
+      // Never archive groups with protected tabs
+      if (tabs.some(t => t.active || t.pinned || t.audible)) continue;
+      // All tabs must be past the stale threshold
+      if (tabs.length > 0 && tabs.every(t => (t.lastAccessed || 0) < cutoff)) {
+        staleGroups.push({ group: g, tabs });
+      }
+    }
+
+    if (staleGroups.length === 0) {
+      return { ok: true, archived: 0, message: 'No stale groups found' };
+    }
+
+    // Find or create the "TabAmber Archives" bookmark folder
+    const searchResults = await chrome.bookmarks.search({ title: 'TabAmber Archives' });
+    let archiveFolder = searchResults.find(n => !n.url); // folders have no url
+    if (!archiveFolder) {
+      // parentId omitted → lands in "Other Bookmarks" by default
+      archiveFolder = await chrome.bookmarks.create({ title: 'TabAmber Archives' });
+    }
+
+    const dateStr = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    let archived = 0;
+
+    for (const { group, tabs } of staleGroups) {
+      const folder = await chrome.bookmarks.create({
+        parentId: archiveFolder.id,
+        title: `${group.title || 'Ungrouped'} — ${dateStr}`,
+      });
+      let bookmarked = 0;
+      for (const tab of tabs) {
+        if (!tab.url || /^(chrome|about|chrome-extension):/.test(tab.url)) continue;
+        try {
+          await chrome.bookmarks.create({ parentId: folder.id, title: tab.title || tab.url, url: tab.url });
+          bookmarked++;
+        } catch (bmErr) {
+          log.warn(`Failed to bookmark tab ${tab.id}: ${bmErr.message}`);
+        }
+      }
+      if (closeAfter && bookmarked > 0) {
+        await chrome.tabs.remove(tabs.map(t => t.id));
+      }
+      health.inc('groupsArchived');
+      archived++;
+      log.info(`Archived group "${group.title}" (${bookmarked} bookmarks, closeAfter=${closeAfter})`);
+    }
+
+    return {
+      ok: true, archived,
+      message: `Archived ${archived} group${archived !== 1 ? 's' : ''} to bookmarks${closeAfter ? ' and closed tabs' : ''}`,
+    };
+  } catch (err) {
+    health.recordError(`Archive stale groups failed: ${err.message}`, 'ARCHIVE_ERROR');
+    log.error('archiveStaleGroups failed', { error: err.message });
+    return { ok: false, error: err.message };
+  }
+};
+
 // ─── Phase 3: AI Intelligence Layer ───────────────────────────────────────
 
 const buildAISignals = async () => {
@@ -425,9 +547,47 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
       case 'ai-habits':
         await runAIHandler(request, sendResponse, async (config) => {
-          return await getHabitAnalysis(config, request.tabHistory || []);
+          let tabHistory = request.tabHistory || [];
+          if (tabHistory.length === 0) {
+            const stored = await chrome.storage.local.get({ tab_history: [] });
+            tabHistory = stored.tab_history;
+          }
+          return await getHabitAnalysis(config, tabHistory);
         });
         return;
+
+      case 'search-tabs': {
+        const query = (request.query || '').toLowerCase().trim();
+        if (!query) {
+          sendResponse({ ok: true, results: [] });
+          return;
+        }
+        const results = [];
+        for (const [tabId, entry] of searchIndex) {
+          if (entry.title.toLowerCase().includes(query) ||
+              entry.url.toLowerCase().includes(query) ||
+              entry.hostname.toLowerCase().includes(query)) {
+            results.push({ tabId, ...entry });
+          }
+        }
+        results.sort((a, b) => b.suspendedAt - a.suspendedAt);
+        sendResponse({ ok: true, results: results.slice(0, 50) });
+        return;
+      }
+
+      case 'get-search-stats': {
+        const suspended = searchIndex.size;
+        const total = (await chrome.tabs.query({})).length;
+        sendResponse({ ok: true, suspended, total });
+        return;
+      }
+
+      case 'archive-stale-groups': {
+        const days = Math.max(1, Math.min(365, Number(request.thresholdDays) || 7));
+        const close = !!request.closeAfter;
+        sendResponse(await archiveStaleGroups(days, close));
+        return;
+      }
 
       case 'ai-refine-names':
         await runAIHandler(request, sendResponse, async (config) => {
@@ -600,6 +760,10 @@ chrome.commands.onCommand.addListener(async (command) => {
       }
       log.info(`Suspension ${paused ? 'paused' : 'resumed'}`);
       break;
+    case 'search-tabs':
+      log.info('Keyboard shortcut: search tabs');
+      chrome.tabs.create({ url: chrome.runtime.getURL('search.html') });
+      break;
   }
 });
 
@@ -626,5 +790,10 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.discarded === false) {
     health.inc('tabsWoken');
     log.info(`Tab ${tabId} woken`);
+    searchIndex.delete(tabId); // tab is alive again, remove from search index
   }
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  searchIndex.delete(tabId);
 });

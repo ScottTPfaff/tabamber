@@ -70,6 +70,12 @@ chrome.storage.local.get(DEFAULTS, prefs => {
   $('forms').checked = prefs.forms;
   $('idle_only').checked = prefs.idle_only;
   $('status').textContent = `Suspending tabs idle for ${prefs.period}+ min`;
+  // Show suspended count in status
+  chrome.runtime.sendMessage({ method: 'get-search-stats' }, resp => {
+    if (resp?.ok && resp.suspended > 0) {
+      $('status').textContent = `Suspending after ${prefs.period}min · ${resp.suspended} suspended`;
+    }
+  });
 });
 
 const save = () => {
@@ -289,6 +295,11 @@ $('ai-anomaly').addEventListener('click', async () => {
 });
 
 // ─── Common ───────────────────────────────────────────────────────────────
+
+$('search-tabs').addEventListener('click', () => {
+  chrome.tabs.create({ url: chrome.runtime.getURL('search.html') });
+  window.close();
+});
 
 $('suspend-all').addEventListener('click', () => {
   chrome.runtime.sendMessage({ method: 'suspend-all' });
